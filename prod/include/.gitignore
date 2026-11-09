@@ -1,0 +1,2 @@
+# Configure の install_dev が配置する OpenSSL 公開ヘッダー。直接編集しない。
+/openssl/

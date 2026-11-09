@@ -1,0 +1,81 @@
+# 全部のファイルを管理対象外
+*
+
+# 管理対象
+
+## ディレクトリ配下のディレクトリ
+!*/
+
+## ディレクトリ配下の拡張子付きファイル
+!*.*
+
+## ライセンスファイル
+!LICENSE
+
+## makefile
+!makefile
+
+# 以下は管理対象外
+
+## Claude Code
+/.claude/
+## Codex
+/.codex/
+
+## デバッグのために LLM に参照させるファイル群の一時置き場
+/prompts/
+
+## 中間ファイル
+obj/
+gen/
+gcov/
+*.gcda
+*.gcno
+*.gcov
+lcov/
+coverage/
+results/
+core
+coverage.xml
+LastCoverageResults.log
+.gitignore.tmp.*
+
+## ビルド/Doxy スキップ用スタンプ
+make_build.stamp
+make_test.stamp
+make_doxy.stamp
+
+## パッケージの展開/パッチ適用スキップ用スタンプ (app/<name>/bin_internal/extract_package.py が生成)
+make_extract.stamp
+make_extract.lock
+
+## leaf テスト ディレクトリ単位の再テスト スキップ用スタンプ
+test.stamp
+
+## 中間ファイル (Doxygen)
+/xml/
+/xml_org/
+
+## 中間ファイル (Coverity)
+idir/
+
+## Python cache
+__pycache__/
+
+## doxybook2 によって生成される Markdown
+/docs/doxybook2/
+/docs/doxybook2_public/
+/docs/doxybook2_internal/
+
+## 成果物
+lib/
+bin/
+cbin/
+!/bin/
+!/prod/bin/
+*.exe
+*.pdb
+*.warn
+
+## トレース
+log/
