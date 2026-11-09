@@ -223,11 +223,37 @@ def target_name(platform, machine):
     raise BuildError(f"未対応の OS です: {platform}")
 
 
-def configure_args(platform, machine, config, prefix, openssldir):
+def find_msvc_linker(which=None):
+    """cl.exe と同じディレクトリにある MSVC の link.exe の絶対パス。
+
+    VC-WIN64A の既定の LD は link で、nmake は PATH から探す。PATH 上で Git 付属の
+    GNU coreutils の link (usr/bin/link.exe) が MSVC より先にあると、legacy プロバイダーの
+    DLL などのリンクが "link: extra operand" で失敗する。Configure に LD を絶対パスで渡し、
+    PATH の順序に依存しないようにする。
+    see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/10-main.conf
+    see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md#ld
+    """
+    if which is None:
+        which = shutil.which
+    cl = which("cl")
+    if cl is None:
+        raise BuildError(
+            "cl が PATH にありません。"
+            " Visual Studio の開発者コマンドプロンプトで実行してください。"
+            " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md"
+        )
+    linker = Path(cl).resolve().parent / "link.exe"
+    if not linker.is_file():
+        raise BuildError(f"cl.exe と同じディレクトリに link.exe がありません: {linker}")
+    return str(linker)
+
+
+def configure_args(platform, machine, config, prefix, openssldir, linker=None):
     """Configure に渡す引数。no-asm と no-pic は渡さない。
 
     Linux の静的ライブラリは、OpenSSL が既定で LIB_CFLAGS に -fPIC を付ける。
     利用側の共有ライブラリへリンクできることは assert_pic で生成結果から確認する。
+    Windows では linker (MSVC の link.exe の絶対パス) を LD として渡す。
     """
     prefix_text = prefix.as_posix()
     openssldir_text = openssldir.as_posix()
@@ -246,6 +272,10 @@ def configure_args(platform, machine, config, prefix, openssldir):
     if selected == "Debug":
         args.append("--debug")
     if platform == "windows":
+        if linker is None:
+            raise BuildError("Windows では MSVC の link.exe の絶対パスが必要です。")
+        # windows-makefile.tmpl は LD を二重引用符で囲むため、空白を含むパスを渡せる。
+        args.append(f"LD={linker}")
         args.extend(WINDOWS_COMPILER_ARGS)
     return args
 
@@ -372,8 +402,9 @@ def require_compiler(platform):
 
 
 # Configure が読むコアモジュール。RPM の perl だけでは足りない。
+# EL9 以降では FindBin も perl-interpreter から別パッケージ (perl-FindBin) に分かれている。
 # see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md
-REQUIRED_PERL_MODULES = ("IPC::Cmd", "Time::Piece")
+REQUIRED_PERL_MODULES = ("FindBin", "IPC::Cmd", "Time::Piece")
 
 
 def require_perl_modules(perl, run=None):
@@ -394,7 +425,8 @@ def require_perl_modules(perl, run=None):
     if missing:
         raise BuildError(
             "Perl のコアモジュールがありません: " + ", ".join(missing) + "。"
-            " RPM 系では perl-core を入れてください。"
+            " RPM 系では perl-core を入れてください"
+            " (個別に入れる場合は perl-IPC-Cmd、perl-Time-Piece、EL9 以降は perl-FindBin も)。"
             " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md"
         )
 
@@ -905,7 +937,10 @@ def build_app(app, config):
     digest = verify_sha256(tar_path, EXPECTED_SHA256[selected])
     prefix = (app / "gen" / "install").resolve()
     openssldir = prefix / "ssl"
-    args = configure_args(platform, platform_mod.machine(), config, prefix, openssldir)
+    linker = find_msvc_linker() if platform == "windows" else None
+    args = configure_args(
+        platform, platform_mod.machine(), config, prefix, openssldir, linker,
+    )
     identity = build_identity(selected, digest, args)
     stamp_path = app / "gen" / "build.stamp"
     if stamp_path.is_file() and read_text(stamp_path) == identity and outputs_ready(app, platform):

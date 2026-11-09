@@ -54,15 +54,27 @@ class BuildOpensslTest(unittest.TestCase):
         self.assertNotIn("no-asm", args)
 
     def test_configure_args_windows_debug_and_rejected_arch(self):
+        linker = "C:/Program Files/VS/bin/Hostx64/x64/link.exe"
         args = build_openssl.configure_args(
             "windows",
             "AMD64",
             "Debug",
             Path("C:/src/openssl/install"),
             Path("C:/src/openssl/install/ssl"),
+            linker,
         )
         self.assertEqual("VC-WIN64A", args[0])
         self.assertIn("--debug", args)
+        # PATH 上の GNU coreutils の link を使わないよう、LD を絶対パスで渡す。
+        self.assertIn(f"LD={linker}", args)
+        with self.assertRaises(build_openssl.BuildError):
+            build_openssl.configure_args(
+                "windows",
+                "AMD64",
+                "Release",
+                Path("C:/src/openssl/install"),
+                Path("C:/src/openssl/install/ssl"),
+            )
         self.assertNotIn("-fPIC", args)
         # 本体由来の警告の抑制と、ソースの文字コードの指定は Windows だけに渡す。
         self.assertEqual(
@@ -78,6 +90,7 @@ class BuildOpensslTest(unittest.TestCase):
             Path("/opt/openssl/install/ssl"),
         )
         self.assertFalse(set(build_openssl.WINDOWS_COMPILER_ARGS) & set(linux_args))
+        self.assertFalse([arg for arg in linux_args if arg.startswith("LD=")])
         with self.assertRaises(build_openssl.BuildError):
             build_openssl.configure_args(
                 "windows",
@@ -85,7 +98,30 @@ class BuildOpensslTest(unittest.TestCase):
                 "Release",
                 Path("C:/src/openssl/install"),
                 Path("C:/src/openssl/install/ssl"),
+                linker,
             )
+
+    def test_find_msvc_linker_uses_cl_directory(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-linker-") as temporary:
+            bin_dir = Path(temporary) / "Hostx64" / "x64"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cl.exe").write_bytes(b"")
+
+            def which(name):
+                self.assertEqual("cl", name)
+                return str(bin_dir / "cl.exe")
+
+            # cl.exe の隣に link.exe が無ければ、PATH の別の link へ頼らず止める。
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.find_msvc_linker(which)
+            (bin_dir / "link.exe").write_bytes(b"")
+            self.assertEqual(
+                str((bin_dir / "link.exe").resolve()),
+                build_openssl.find_msvc_linker(which),
+            )
+        with self.assertRaises(build_openssl.BuildError) as missing:
+            build_openssl.find_msvc_linker(lambda name: None)
+        self.assertIn("cl", str(missing.exception))
 
     def test_configure_args_reject_space_and_unknown_config(self):
         with self.assertRaises(build_openssl.BuildError):
@@ -268,13 +304,16 @@ class BuildOpensslTest(unittest.TestCase):
             self.assertEqual("utf-8", kwargs.get("encoding"))
             self.assertEqual("/opt/perl/bin/perl", cmd[0])
             name = cmd[1][2:]
-            code = 2 if name == "Time::Piece" else 0
+            code = 2 if name in ("FindBin", "Time::Piece") else 0
             return subprocess.CompletedProcess(cmd, code, "", "")
 
+        self.assertIn("FindBin", build_openssl.REQUIRED_PERL_MODULES)
         with self.assertRaises(build_openssl.BuildError) as caught:
             build_openssl.require_perl_modules("/opt/perl/bin/perl", fail_run)
+        self.assertIn("FindBin", str(caught.exception))
         self.assertIn("Time::Piece", str(caught.exception))
         self.assertIn("perl-core", str(caught.exception))
+        self.assertIn("perl-FindBin", str(caught.exception))
 
         def ok_run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, "", "")
