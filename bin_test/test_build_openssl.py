@@ -64,6 +64,20 @@ class BuildOpensslTest(unittest.TestCase):
         self.assertEqual("VC-WIN64A", args[0])
         self.assertIn("--debug", args)
         self.assertNotIn("-fPIC", args)
+        # 本体由来の警告の抑制と、ソースの文字コードの指定は Windows だけに渡す。
+        self.assertEqual(
+            build_openssl.WINDOWS_COMPILER_ARGS,
+            args[-len(build_openssl.WINDOWS_COMPILER_ARGS):],
+        )
+        self.assertIn("-source-charset:utf-8", args)
+        linux_args = build_openssl.configure_args(
+            "linux",
+            "x86_64",
+            "Debug",
+            Path("/opt/openssl/install"),
+            Path("/opt/openssl/install/ssl"),
+        )
+        self.assertFalse(set(build_openssl.WINDOWS_COMPILER_ARGS) & set(linux_args))
         with self.assertRaises(build_openssl.BuildError):
             build_openssl.configure_args(
                 "windows",
@@ -318,6 +332,18 @@ class BuildOpensslTest(unittest.TestCase):
                 build_openssl.INCLUDE_GITIGNORE,
                 (include / ".gitignore").read_text(encoding="utf-8"),
             )
+
+    def test_copy_pdbs_places_only_static_library_pdb(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-pdb-") as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            source.mkdir()
+            for name in ("ossl_static.pdb", "dso.pdb"):
+                (source / name).write_bytes(b"pdb")
+            dest = root / "lib"
+            build_openssl.copy_pdbs(source, root / "install" / "lib", dest)
+            self.assertEqual(["ossl_static.pdb"], sorted(path.name for path in dest.iterdir()))
+            self.assertIn("dso.pdb", build_openssl.PRODUCT_LIB_NAMES)
 
     def test_defined_macros_ignore_comments_and_undef(self):
         data = b"\n".join([

@@ -65,6 +65,27 @@ PERL_COMMANDS = {
     "windows": "strawberry-perl",
 }
 DEVBIN_WIN_URL = "https://github.com/Hondarer/devbin-win"
+# Windows (MSVC) で OpenSSL 本体のソースが出す警告への対処。Configure は、ターゲットの後ろに
+# 書いたコンパイラー オプションを OpenSSL の既定の CFLAGS (/W3 /wd4090 ...) の後ろに追加する。
+# 抑制する警告は、OpenSSL の公式の設定 (/W3) でも出る本体由来のもので、内容を確認したうえで抑制する。
+# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md
+WINDOWS_COMPILER_ARGS = [
+    # C4267: size_t から int などへの変換。本体全体で多数ある。
+    "-wd4267",
+    # C4244: 整数の縮小変換。
+    "-wd4244",
+    # C4133: tsan_assist.h の tsan_add などが sizeof で 64/32 ビットの Interlocked 関数を選ぶ。
+    # 実行されない 64 ビット側でも型が検査され、int のときに警告となる。
+    "-wd4133",
+    # C4334: 32 ビットのシフトの 64 ビットへの変換。quic_vlint.h のシフトは最大 1U << 3。
+    "-wd4334",
+    # C4319: ~ の結果のゼロ拡張。bn_gcd.c などのビット マスクの演算。
+    "-wd4319",
+    # C4819 への対処。日本語環境 (コード ページ 932) でも、ソースを UTF-8 として読む。
+    # 警告の抑制ではなく、読み方を正す。実行文字セットは変えない。
+    # see: https://learn.microsoft.com/en-us/cpp/build/reference/source-charset-set-source-character-set
+    "-source-charset:utf-8",
+]
 MIN_PERL = (5, 10, 0)
 # INSTALL.md のアセンブラー表。VAES に必要な NASM の下限。
 MIN_NASM = (2, 13, 3)
@@ -94,6 +115,8 @@ PRODUCT_LIB_NAMES = (
     "libcrypto.pdb",
     "libssl.pdb",
     "ossl_static.pdb",
+    # 以前の版が誤って配置した DSO のデバッグ情報。clean で削除する。
+    "dso.pdb",
 )
 INCLUDE_GITIGNORE = (
     "# Configure の install_dev が配置する OpenSSL 公開ヘッダー。直接編集しない。\n"
@@ -218,6 +241,8 @@ def configure_args(platform, machine, config, prefix, openssldir):
     ]
     if selected == "Debug":
         args.append("--debug")
+    if platform == "windows":
+        args.extend(WINDOWS_COMPILER_ARGS)
     return args
 
 
@@ -818,13 +843,17 @@ def copy_tree_files(src_dir, dest_dir):
         shutil.copy2(path, target)
 
 
+# 静的ライブラリのオブジェクトは /Fdossl_static.pdb でデバッグ情報を書く。
+# 同じ場所の dso.pdb や providers/legacy.pdb は静的ライブラリと関係しないため配置しない。
+# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/10-main.conf
+STATIC_PDB_NAME = "ossl_static.pdb"
+
+
 def copy_pdbs(source, install_lib, dest_lib):
     for directory in (source, install_lib):
-        if not directory.is_dir():
-            continue
-        for path in directory.glob("*.pdb"):
-            if path.is_file():
-                atomic_copy(path, dest_lib / path.name)
+        path = directory / STATIC_PDB_NAME
+        if path.is_file():
+            atomic_copy(path, dest_lib / path.name)
 
 
 def build_and_install(source, platform):

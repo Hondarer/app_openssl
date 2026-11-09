@@ -38,7 +38,12 @@ Table: Configure に渡す主なオプションと理由
 
 ほかの app から利用する場合は、その app の `appdeps.mk` に `APP_DEPS += openssl` を記載し、対象の `makepart.mk` にリンク指定を追加します。  
 リンク順は ssl の次が crypto です。  
-公開ヘッダーは system include として提供し、ソースでは `#include <openssl/ssl.h>` と書きます。
+公開ヘッダーは system include として提供し、ソースでは `#include <openssl/ssl.h>` と書きます。  
+`APP_DEPS` で取り込むと、Linux では `-isystem`、Windows では `/external:I` と `/external:W0` でヘッダーを参照します。  
+この取り込み方では、testfw の警告オプション (Linux) と `/W4` (Windows) でも、公開ヘッダーとよく使うマクロの展開から警告は出ません。  
+公開ヘッダーを通常の include パスで参照すると、Linux では構造体の詰め物の警告 (`-Wpadded`) が出ます。  
+構造体の配置は ABI の一部であり、ヘッダーにパッチを当てずに system include で参照してください。  
+Windows では、`<windows.h>` (`<wincrypt.h>`) と OpenSSL のヘッダーは、どちらを先に取り込んでも問題ありません。
 
 Linux で利用側が共有ライブラリの場合は、OpenSSL の関数を公開しないよう、リンク時に次を追加します。  
 根拠は GNU ld の [`--exclude-libs`](https://sourceware.org/binutils/docs/ld/Options.html) です。
@@ -66,7 +71,10 @@ python3 -X warn_default_encoding -W error::EncodingWarning app/openssl/bin_test/
 アセンブルは OpenSSL 自身のビルドが行い、makefw にはアセンブラーの規則を追加しません。
 
 OpenSSL 本体にはパッチを当てません。  
-ビルドの設定は、`bin_internal/build_openssl.py` が Configure へ渡す引数で行います。
+ビルドの設定は、`bin_internal/build_openssl.py` が Configure へ渡す引数で行います。  
+Windows では、OpenSSL の公式の設定 (`/W3`) でも出る本体由来の警告 (C4267、C4244、C4133、C4334、C4319) を、内容を確認したうえで Configure の引数で抑制します。  
+日本語環境で UTF-8 のソースを読むときの警告 (C4819) は、抑制せずに `-source-charset:utf-8` で読み方を正します。  
+Linux のビルドでは警告は出ません。
 
 アーカイブ、ビルド スクリプト、Configure の引数が変わらず、配置物がそろっている場合は、ビルドを省略します。  
 `CONFIG=Debug` のときだけ Configure に `--debug` を渡し、`RelWithDebInfo` と `Release` は OpenSSL のリリース設定を使います。  
@@ -85,8 +93,15 @@ Table: 環境別の OpenSSL のビルドに必要なツール
 
 RPM 系の Linux では、`perl` パッケージだけでは Perl のモジュールが足りないため、`perl-core` を導入します ([NOTES-PERL.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md))。
 
-Windows の Configure には、`perl -MConfig -e "print $Config{osname}"` が `MSWin32` となる Perl が必要です ([NOTES-WINDOWS.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md))。  
+Windows の Configure には、`osname` が `MSWin32` となる Perl が必要です ([NOTES-WINDOWS.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md))。  
 Git 付属の Perl (`msys`) は使えません。  
+PowerShell では、次のコマンドで `MSWin32` と表示されることを確認します。  
+二重引用符では `$Config` が PowerShell の変数として展開されるため、単一引用符で囲みます。
+
+```powershell
+strawberry-perl -MConfig -e 'print $Config{osname}'
+```
+
 ビルド スクリプトは PATH から `strawberry-perl` を探して Configure を起動します。  
 [devbin-win](https://github.com/Hondarer/devbin-win) の Strawberry Perl を導入すると、`perl.exe` が `strawberry-perl.exe` に改名され、PATH の後段に追加されます。  
 `perl` で起動するものは Git 付属の Perl のまま変わりません。  
