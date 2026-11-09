@@ -66,7 +66,7 @@ python3 -X warn_default_encoding -W error::EncodingWarning app/openssl/bin_test/
 ```
 
 `packages/` の公式アーカイブを `gen/` へ展開し、OpenSSL 自身の Configure と make (Windows では nmake) でビルドします。  
-公開ヘッダーを `prod/include/openssl/`、静的ライブラリを `prod/lib/` に配置します。  
+公開ヘッダーを `prod/include/openssl/`、静的ライブラリを `prod/lib/`、ライセンス文を `prod/libsrc/openssl/LICENSE.txt` に配置します。  
 展開先、オブジェクト、Configure とビルドのログ、配置物は Git 管理対象外です。  
 アセンブルは OpenSSL 自身のビルドが行い、makefw にはアセンブラーの規則を追加しません。
 
@@ -114,5 +114,7 @@ Linux の make は、親の make にジョブ サーバーがあれば同じジ�
 ## ライセンス
 
 OpenSSL 本体のライセンスは、アーカイブ内の `LICENSE.txt` (Apache License 2.0) が正本です。  
-本体の著作権表示とライセンス条件を維持してください。  
+ビルド後は `prod/libsrc/openssl/LICENSE.txt` でも参照できます。  
+アーカイブに NOTICE ファイルはありません。  
+静的ライブラリをリンクした成果物を配布する場合は、このライセンス文を添付し、本体の著作権表示とライセンス条件を維持してください。  
 app 直下の `LICENSE` は、手動作成したラッパー部分に適用します。

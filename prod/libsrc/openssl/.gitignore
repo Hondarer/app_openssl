@@ -1,0 +1,2 @@
+# bin_internal/build_openssl.py が packages/ のアーカイブから配置する生成物。直接編集しない。
+/LICENSE.txt

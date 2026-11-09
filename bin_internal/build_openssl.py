@@ -118,6 +118,10 @@ PRODUCT_LIB_NAMES = (
     # 以前の版が誤って配置した DSO のデバッグ情報。clean で削除する。
     "dso.pdb",
 )
+# 静的ライブラリとともに配布するライセンス文。アーカイブの LICENSE.txt を
+# zlib や cjson と同じくライブラリのディレクトリへ配置する。NOTICE ファイルは同梱されない。
+LICENSE_NAME = "LICENSE.txt"
+LICENSE_RELATIVE = ("prod", "libsrc", "openssl", LICENSE_NAME)
 INCLUDE_GITIGNORE = (
     "# Configure の install_dev が配置する OpenSSL 公開ヘッダー。直接編集しない。\n"
     "/openssl/\n"
@@ -507,6 +511,8 @@ def outputs_ready(app, platform):
     for header in ("ssl.h", "configuration.h", "opensslv.h"):
         if not (include_dir / header).is_file():
             return False
+    if not app.joinpath(*LICENSE_RELATIVE).is_file():
+        return False
     return True
 
 
@@ -555,6 +561,9 @@ def remove_products(app):
     headers = app / "prod" / "include" / "openssl"
     if headers.exists():
         shutil.rmtree(headers)
+    license_path = app.joinpath(*LICENSE_RELATIVE)
+    if license_path.is_file():
+        license_path.unlink()
 
 
 def remove_gen_except_lock(gen_dir):
@@ -960,6 +969,10 @@ def build_app(app, config):
             atomic_copy(src, dest_lib / src.name)
         copy_tree_files(header_dir, app / "prod" / "include" / "openssl")
         copy_pdbs(source, prefix / "lib", dest_lib)
+        atomic_copy(
+            find_file([source / LICENSE_NAME], LICENSE_NAME),
+            app.joinpath(*LICENSE_RELATIVE),
+        )
         assert_config_header(app / "prod" / "include" / "openssl" / "configuration.h")
         assert_version_header(
             app / "prod" / "include" / "openssl" / "opensslv.h",

@@ -323,10 +323,14 @@ class BuildOpensslTest(unittest.TestCase):
             gen = app / "gen" / "src"
             gen.mkdir(parents=True)
             (gen / "Configure").write_text("configure\n", encoding="utf-8", newline="\n")
+            license_path = app.joinpath(*build_openssl.LICENSE_RELATIVE)
+            license_path.parent.mkdir(parents=True)
+            license_path.write_text("Apache License\n", encoding="utf-8", newline="\n")
             code = build_openssl.main(["--app-dir", str(app), "--clean"])
             self.assertEqual(0, code)
             self.assertFalse((include / "openssl").exists())
             self.assertFalse((lib / "libcrypto.a").exists())
+            self.assertFalse(license_path.exists())
             self.assertFalse((app / "gen").exists())
             self.assertEqual(
                 build_openssl.INCLUDE_GITIGNORE,
@@ -344,6 +348,24 @@ class BuildOpensslTest(unittest.TestCase):
             build_openssl.copy_pdbs(source, root / "install" / "lib", dest)
             self.assertEqual(["ossl_static.pdb"], sorted(path.name for path in dest.iterdir()))
             self.assertIn("dso.pdb", build_openssl.PRODUCT_LIB_NAMES)
+
+    def test_outputs_ready_requires_license(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-ready-") as temporary:
+            app = Path(temporary)
+            lib = app / "prod" / "lib"
+            lib.mkdir(parents=True)
+            for name in build_openssl.static_lib_names("linux"):
+                (lib / name).write_bytes(b"lib")
+            headers = app / "prod" / "include" / "openssl"
+            headers.mkdir(parents=True)
+            for name in ("ssl.h", "configuration.h", "opensslv.h"):
+                (headers / name).write_text("header\n", encoding="utf-8", newline="\n")
+            # ライセンス文が無ければ、成果物はそろっていない。
+            self.assertFalse(build_openssl.outputs_ready(app, "linux"))
+            license_path = app.joinpath(*build_openssl.LICENSE_RELATIVE)
+            license_path.parent.mkdir(parents=True)
+            license_path.write_text("Apache License\n", encoding="utf-8", newline="\n")
+            self.assertTrue(build_openssl.outputs_ready(app, "linux"))
 
     def test_defined_macros_ignore_comments_and_undef(self):
         data = b"\n".join([
