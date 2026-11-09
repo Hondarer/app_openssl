@@ -39,17 +39,32 @@ EXPECTED_SHA256 = {
 PACKAGE_PATTERN = re.compile(r"^openssl-(\d+)\.(\d+)\.(\d+)\.tar\.gz$", re.IGNORECASE)
 # no-shared は静的ライブラリだけを作る。no-pinshared は、その静的ライブラリを
 # 利用側の共有ライブラリへ入れたときにプロセスへ OpenSSL を固定しないための指定。
+# no-autoload-config は、OPENSSLDIR の openssl.cnf を初期化時に自動で読まない。
+# OPENSSLDIR はビルドした場所の絶対パスになるため、配布先でそのパスを作れる利用者が
+# 設定を差し込めないようにする。
 # enable-tls1_3 と enable-dtls1_2 は既定で有効な機能を明示する。
 # see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md
 FEATURE_ARGS = [
     "no-shared",
     "no-pinshared",
+    "no-autoload-config",
     "no-apps",
     "no-docs",
     "no-makedepend",
     "enable-tls1_3",
     "enable-dtls1_2",
 ]
+# Windows では Configure に osname が MSWin32 の Perl が必要になる。
+# devbin-win は Strawberry Perl の perl.exe を strawberry-perl.exe に改名して PATH に置く。
+# Git 付属の Perl (msys) を前提とするシェル スクリプトが perl で起動するものを変えないため。
+# Configure は起動した Perl の絶対パス ($^X) を Makefile に記録するため、
+# 以降の make や nmake も同じ Perl を使う。
+# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configure
+PERL_COMMANDS = {
+    "linux": "perl",
+    "windows": "strawberry-perl",
+}
+DEVBIN_WIN_URL = "https://github.com/Hondarer/devbin-win"
 MIN_PERL = (5, 10, 0)
 # INSTALL.md のアセンブラー表。VAES に必要な NASM の下限。
 MIN_NASM = (2, 13, 3)
@@ -63,6 +78,9 @@ DISABLED_MACROS = (
     b"OPENSSL_NO_TLS1_3",
     b"OPENSSL_NO_DTLS",
     b"OPENSSL_NO_DTLS1_2",
+)
+REQUIRED_MACROS = (
+    b"OPENSSL_NO_AUTOLOAD_CONFIG",
 )
 PRODUCT_LIB_NAMES = (
     "libcrypto.a",
@@ -85,10 +103,11 @@ _DEFINE_RE = re.compile(br"^\s*#\s*define\s+([A-Z0-9_]+)\b", re.MULTILINE)
 _MAKEFLAG_RE = re.compile(
     r"(?:^|\s)(-j(?:\d+)?|--jobs=\d+|--jobserver-auth=\S+|--jobserver-fds=\S+)"
 )
+# PERL は Configure が $^X より優先して Makefile に記録するため、外から引き継がない。
 _SANITIZE_ENV = (
     "CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS",
     "AR", "RANLIB", "AS", "ASFLAGS", "LIBS", "DEFINES", "LD",
-    "CL", "_CL_", "LINK",
+    "CL", "_CL_", "LINK", "PERL",
 )
 
 
@@ -105,25 +124,28 @@ def configure_stdio():
 
 
 def filter_makeflags(flags):
-    """親 make の MAKEFLAGS から、ジョブサーバと並列数だけを残す。"""
+    """親 make の MAKEFLAGS から、ジョブ サーバーと並列数だけを残す。"""
     if not flags:
         return ""
     return " ".join(match.group(1) for match in _MAKEFLAG_RE.finditer(flags))
 
 
 def parallel_make_flags(raw):
-    """子 make に渡す並列指定。壊れたジョブサーバトークンは渡さない。
+    """子 make に渡す並列指定。
 
-    Python の subprocess は既定でジョブサーバの fd を閉じる。
-    MAKEFLAGS に --jobserver-auth だけが残ると、GNU make は -j1 へ落ちる。
-    親の -jN があるときはその数を使い、無いときは CPU 数を使う。
+    親 make にジョブ サーバーがあれば、その指定をそのまま渡して同じジョブ枠を共有する。
+    makelocal.mk の pre-build は行頭の + でジョブ サーバーを子へ渡し、
+    run_logged は make の子プロセスで fd を閉じない。
+    ジョブ サーバーが無く -jN だけがあればその数を使い、どちらも無いときは CPU 数を使う。
+    数値の無い -j は無制限になるため使わない。
+    see: https://www.gnu.org/software/make/manual/html_node/Job-Slots.html
     """
-    tokens = [
-        token for token in filter_makeflags(raw).split()
-        if not token.startswith("--jobserver-")
-    ]
-    if any(re.fullmatch(r"-j\d+|--jobs=\d+", token) for token in tokens):
+    tokens = filter_makeflags(raw).split()
+    if any(token.startswith("--jobserver-") for token in tokens):
         return " ".join(tokens)
+    counted = [token for token in tokens if re.fullmatch(r"-j\d+|--jobs=\d+", token)]
+    if counted:
+        return " ".join(counted)
     return f"-j{os.cpu_count() or 1}"
 
 
@@ -175,7 +197,11 @@ def target_name(platform, machine):
 
 
 def configure_args(platform, machine, config, prefix, openssldir):
-    """Configure に渡す引数。no-asm と no-pic は渡さない。"""
+    """Configure に渡す引数。no-asm と no-pic は渡さない。
+
+    Linux の静的ライブラリは、OpenSSL が既定で LIB_CFLAGS に -fPIC を付ける。
+    利用側の共有ライブラリへリンクできることは assert_pic で生成結果から確認する。
+    """
     prefix_text = prefix.as_posix()
     openssldir_text = openssldir.as_posix()
     if " " in prefix_text or " " in openssldir_text:
@@ -190,10 +216,6 @@ def configure_args(platform, machine, config, prefix, openssldir):
         "--libdir=lib",
         f"--openssldir={openssldir_text}",
     ]
-    if platform == "linux":
-        # 静的ライブラリを利用側の共有ライブラリへリンクするための PIC。
-        # OpenSSL の linux ターゲットは既定で PIC だが、生成結果でも確認する。
-        args.append("-fPIC")
     if selected == "Debug":
         args.append("--debug")
     return args
@@ -222,20 +244,39 @@ def require_perl(version, osname, platform):
         raise BuildError(
             "Windows では osname が MSWin32 の Perl が必要です。"
             f" 検出: {osname}。"
-            " Strawberry Perl または ActiveState Perl を PATH の先頭に置いてください。"
-            " Git 付属の Perl は使えません。"
+            f" {PERL_COMMANDS['windows']} が Strawberry Perl を指しているか確認してください。"
             " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md"
         )
 
 
-def query_perl():
-    if shutil.which("perl") is None:
+def find_perl(platform, which=None):
+    """Configure を起動する Perl の絶対パス。"""
+    if which is None:
+        which = shutil.which
+    name = PERL_COMMANDS.get(platform)
+    if name is None:
+        raise BuildError(f"未対応の OS です: {platform}")
+    path = which(name)
+    if path is not None:
+        return path
+    if platform == "windows":
         raise BuildError(
-            "perl が PATH にありません。Perl 5.10 以上が必要です。"
-            " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md"
+            f"{name} が PATH にありません。"
+            f" devbin-win の Strawberry Perl を導入してください ({DEVBIN_WIN_URL})。"
+            " Strawberry Perl の perl.exe を strawberry-perl.exe に改名し、"
+            "perl\\bin を PATH の後段へ追加すると同じ状態になります。"
+            " Git 付属の Perl は使えません。"
+            " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md"
         )
+    raise BuildError(
+        f"{name} が PATH にありません。Perl 5.10 以上が必要です。"
+        " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md"
+    )
+
+
+def query_perl(perl):
     result = subprocess.run(
-        ["perl", "-MConfig", "-e", r"print $^V, qq{\n}, $Config{osname}, qq{\n}"],
+        [perl, "-MConfig", "-e", r"print $^V, qq{\n}, $Config{osname}, qq{\n}"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -296,7 +337,7 @@ def require_compiler(platform):
                 " see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md"
             )
         return
-    missing = [name for name in ("gcc", "make", "ar", "perl") if shutil.which(name) is None]
+    missing = [name for name in ("gcc", "make", "ar") if shutil.which(name) is None]
     if missing:
         raise BuildError(f"{', '.join(missing)} が PATH にありません。")
 
@@ -306,14 +347,14 @@ def require_compiler(platform):
 REQUIRED_PERL_MODULES = ("IPC::Cmd", "Time::Piece")
 
 
-def require_perl_modules(run=None):
+def require_perl_modules(perl, run=None):
     """OpenSSL の Configure に必要な Perl モジュールがあることを確認する。"""
     if run is None:
         run = subprocess.run
     missing = []
     for name in REQUIRED_PERL_MODULES:
         result = run(
-            ["perl", f"-M{name}", "-e", "1"],
+            [perl, f"-M{name}", "-e", "1"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -330,12 +371,15 @@ def require_perl_modules(run=None):
 
 
 def require_tools(platform):
+    """ビルドに使うツールを確認し、Configure を起動する Perl の絶対パスを返す。"""
     require_compiler(platform)
-    version, osname = query_perl()
+    perl = find_perl(platform)
+    version, osname = query_perl(perl)
     require_perl(version, osname, platform)
-    require_perl_modules()
+    require_perl_modules(perl)
     if platform == "windows":
         require_nasm(query_nasm())
+    return perl
 
 
 def list_packages(packages_dir):
@@ -601,7 +645,11 @@ def drop_unsupported_enables(args, log_bytes):
     return [arg for arg in args if arg not in dropped]
 
 
-def run_logged(cmd, cwd, env, log_path, keep=False, append=False):
+def run_logged(cmd, cwd, env, log_path, keep=False, append=False, inherit_fds=False):
+    """コマンドを実行し、出力をログと標準出力へ書く。
+
+    inherit_fds は、親 make のジョブ サーバーの fd を子 make へ引き継ぐ場合に True にする。
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     print("INFO: " + " ".join(cmd), file=sys.stderr)
     chunks = []
@@ -612,6 +660,7 @@ def run_logged(cmd, cwd, env, log_path, keep=False, append=False):
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            close_fds=not inherit_fds,
         )
         assert proc.stdout is not None
         for chunk in iter(lambda: proc.stdout.read(8192), b""):
@@ -624,12 +673,12 @@ def run_logged(cmd, cwd, env, log_path, keep=False, append=False):
     return code, b"".join(chunks)
 
 
-def configure_source(source, args):
+def configure_source(source, args, perl):
     # source は gen/src/<version>。ログは gen/configure.log に置く。
     log_path = source.parent.parent / "configure.log"
     env = child_env("configure")
     code, output = run_logged(
-        ["perl", "Configure", *args], source, env, log_path, keep=True,
+        [perl, "Configure", *args], source, env, log_path, keep=True,
     )
     if code == 0:
         return
@@ -643,7 +692,7 @@ def configure_source(source, args):
         file=sys.stderr,
     )
     code, _output = run_logged(
-        ["perl", "Configure", *reduced], source, env, log_path, keep=True,
+        [perl, "Configure", *reduced], source, env, log_path, keep=True,
     )
     if code != 0:
         raise BuildError(
@@ -651,15 +700,25 @@ def configure_source(source, args):
         )
 
 
+def makefile_variable(data, name):
+    """生成された Makefile から、行頭の NAME= の値を返す。無ければ None。"""
+    match = re.search(
+        rb"^" + re.escape(name.encode("ascii")) + rb"=(.*)$", data, re.MULTILINE,
+    )
+    if match is None:
+        return None
+    return match.group(1)
+
+
 def assert_pic(source):
-    blob = b""
-    for name in ("Makefile", "configdata.pm"):
-        path = source / name
-        if path.is_file():
-            blob += path.read_bytes()
-    if b"-fPIC" not in blob and b"-fpic" not in blob:
+    """ライブラリのオブジェクトが PIC でコンパイルされることを、生成された Makefile で確認する。"""
+    makefile = source / "Makefile"
+    data = makefile.read_bytes() if makefile.is_file() else b""
+    cflags = (makefile_variable(data, "LIB_CFLAGS") or b"").split()
+    cppflags = (makefile_variable(data, "LIB_CPPFLAGS") or b"").split()
+    if not any(flag in (b"-fPIC", b"-fpic") for flag in cflags) or b"-DOPENSSL_PIC" not in cppflags:
         raise BuildError(
-            "Configure 結果に -fPIC がありません。"
+            "Makefile の LIB_CFLAGS に -fPIC、または LIB_CPPFLAGS に -DOPENSSL_PIC がありません。"
             " 静的ライブラリを共有ライブラリへリンクできません。"
         )
 
@@ -673,6 +732,9 @@ def assert_config_header(path):
     disabled = [name.decode("ascii") for name in DISABLED_MACROS if name in defined]
     if disabled:
         raise BuildError("期待した機能が無効です: " + ", ".join(disabled))
+    missing = [name.decode("ascii") for name in REQUIRED_MACROS if name not in defined]
+    if missing:
+        raise BuildError("期待した機能の無効化が反映されていません: " + ", ".join(missing))
 
 
 def assert_version_header(path, version):
@@ -768,13 +830,18 @@ def copy_pdbs(source, install_lib, dest_lib):
 def build_and_install(source, platform):
     log_path = source.parent.parent / "build.log"
     if platform == "windows":
+        # nmake は並列ビルドができないため、Windows のビルドは時間がかかる。
         env = child_env("nmake")
         commands = (["nmake"], ["nmake", "install_dev"])
     else:
         env = child_env("make")
         commands = (["make"], ["make", "install_dev"])
     for index, cmd in enumerate(commands):
-        code, _output = run_logged(cmd, source, env, log_path, append=index > 0)
+        code, _output = run_logged(
+            cmd, source, env, log_path,
+            append=index > 0,
+            inherit_fds=platform != "windows",
+        )
         if code != 0:
             raise BuildError(
                 f"コマンドが失敗しました (exit {code}): {' '.join(cmd)}\nログ: {log_path}"
@@ -807,7 +874,7 @@ def build_app(app, config):
         print("INFO: OpenSSL のビルド成果物は最新です。", file=sys.stderr)
         return
 
-    require_tools(platform)
+    perl = require_tools(platform)
     ensure_include_gitignore(app)
     gen_dir = app / "gen"
     gen_dir.mkdir(parents=True, exist_ok=True)
@@ -824,7 +891,7 @@ def build_app(app, config):
                     extract_stamp.unlink()
                 source = ensure_source(app, tar_path, digest)
             print(f"INFO: OpenSSL {OPENSSL_VERSION} を Configure します。", file=sys.stderr)
-            configure_source(source, args)
+            configure_source(source, args, perl)
             write_text(gen_dir / "configure.stamp", "args=" + " ".join(args))
         if platform == "linux":
             assert_pic(source)

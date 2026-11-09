@@ -19,6 +19,7 @@ class BuildOpensslTest(unittest.TestCase):
             [
                 "no-shared",
                 "no-pinshared",
+                "no-autoload-config",
                 "no-apps",
                 "no-docs",
                 "no-makedepend",
@@ -46,7 +47,9 @@ class BuildOpensslTest(unittest.TestCase):
         self.assertIn("--prefix=/opt/openssl/install", args)
         self.assertIn("--libdir=lib", args)
         self.assertIn("--openssldir=/opt/openssl/install/ssl", args)
-        self.assertIn("-fPIC", args)
+        self.assertIn("no-autoload-config", args)
+        # PIC は OpenSSL の既定に任せ、assert_pic で生成結果を確認する。
+        self.assertNotIn("-fPIC", args)
         self.assertNotIn("--debug", args)
         self.assertNotIn("no-asm", args)
 
@@ -147,21 +150,91 @@ class BuildOpensslTest(unittest.TestCase):
             "MFLAGS": "-j",
             "MAKELEVEL": "2",
             "PATH": "/usr/bin",
+            "PERL": "/usr/bin/perl",
         }
         make_env = build_openssl.child_env("make", base)
         self.assertNotIn("CFLAGS", make_env)
-        self.assertNotIn("jobserver", make_env["MAKEFLAGS"])
-        self.assertRegex(make_env["MAKEFLAGS"], r"-j\d+")
+        self.assertNotIn("PERL", make_env)
         self.assertNotIn("MFLAGS", make_env)
         self.assertEqual("2", make_env["MAKELEVEL"])
-        counted = build_openssl.child_env("make", {"MAKEFLAGS": "-j8 --jobserver-auth=4,5"})
-        self.assertEqual("-j8", counted["MAKEFLAGS"])
         nmake_env = build_openssl.child_env("nmake", base)
         self.assertNotIn("MAKEFLAGS", nmake_env)
         self.assertNotIn("MAKELEVEL", nmake_env)
         configure_env = build_openssl.child_env("configure", base)
         self.assertNotIn("MAKEFLAGS", configure_env)
         self.assertNotIn("CFLAGS", configure_env)
+        # Configure は環境変数 PERL を $^X より優先して Makefile に記録する。
+        self.assertNotIn("PERL", configure_env)
+
+    def test_parallel_make_flags_share_parent_jobserver(self):
+        # ジョブ サーバーがあれば、親と同じジョブ枠を共有する。
+        self.assertEqual(
+            "-j8 --jobserver-auth=3,4",
+            build_openssl.parallel_make_flags("-j8 --jobserver-auth=3,4 --no-print-directory"),
+        )
+        self.assertEqual(
+            "--jobserver-auth=fifo:/tmp/GMfifo1",
+            build_openssl.parallel_make_flags("--jobserver-auth=fifo:/tmp/GMfifo1"),
+        )
+        # ジョブ サーバーが無ければ、-jN の数だけを使う。
+        self.assertEqual("-j4", build_openssl.parallel_make_flags("-j4 -k"))
+        # 数値の無い -j は無制限になるため、CPU 数に置き換える。
+        cpu = f"-j{build_openssl.os.cpu_count() or 1}"
+        self.assertEqual(cpu, build_openssl.parallel_make_flags("-j"))
+        self.assertEqual(cpu, build_openssl.parallel_make_flags(""))
+
+    def test_find_perl_uses_platform_command(self):
+        seen = []
+
+        def which(name):
+            seen.append(name)
+            return f"C:/devbin/{name}.exe"
+
+        self.assertEqual(
+            "C:/devbin/strawberry-perl.exe",
+            build_openssl.find_perl("windows", which),
+        )
+        self.assertEqual("/usr/bin/perl", build_openssl.find_perl("linux", lambda name: "/usr/bin/" + name))
+        self.assertEqual(["strawberry-perl"], seen)
+
+    def test_find_perl_missing_on_windows_mentions_devbin(self):
+        with self.assertRaises(build_openssl.BuildError) as caught:
+            build_openssl.find_perl("windows", lambda name: None)
+        message = str(caught.exception)
+        self.assertIn("strawberry-perl", message)
+        self.assertIn(build_openssl.DEVBIN_WIN_URL, message)
+        with self.assertRaises(build_openssl.BuildError) as linux:
+            build_openssl.find_perl("linux", lambda name: None)
+        self.assertIn("NOTES-PERL.md", str(linux.exception))
+
+    def test_assert_pic_reads_library_flags(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-pic-") as temporary:
+            source = Path(temporary)
+            makefile = source / "Makefile"
+            makefile.write_bytes(
+                b"CFLAGS=-Wall -O3\n"
+                b"LIB_CPPFLAGS=-DL_ENDIAN -DOPENSSL_PIC $(CPPFLAGS)\n"
+                b"LIB_CFLAGS=-fPIC $(CNF_CFLAGS) $(CFLAGS)\n"
+            )
+            build_openssl.assert_pic(source)
+            # LIB_CFLAGS 以外にだけ -fPIC があっても、ライブラリは PIC にならない。
+            makefile.write_bytes(
+                b"CFLAGS=-Wall -O3 -fPIC\n"
+                b"LIB_CPPFLAGS=-DL_ENDIAN $(CPPFLAGS)\n"
+                b"LIB_CFLAGS=$(CNF_CFLAGS) $(CFLAGS)\n"
+            )
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_pic(source)
+
+    def test_config_header_requires_autoload_config_disabled(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-config-") as temporary:
+            header = Path(temporary) / "configuration.h"
+            header.write_bytes(b"# define OPENSSL_NO_AUTOLOAD_CONFIG\n")
+            build_openssl.assert_config_header(header)
+            header.write_bytes(b"# define OPENSSL_NO_EGD\n")
+            with self.assertRaises(build_openssl.BuildError) as caught:
+                build_openssl.assert_config_header(header)
+            self.assertIn("OPENSSL_NO_AUTOLOAD_CONFIG", str(caught.exception))
 
     def test_nasm_version_parser(self):
         self.assertEqual((2, 15, 5), build_openssl.parse_nasm_version(
@@ -179,19 +252,20 @@ class BuildOpensslTest(unittest.TestCase):
     def test_missing_perl_module_mentions_perl_core(self):
         def fail_run(cmd, **kwargs):
             self.assertEqual("utf-8", kwargs.get("encoding"))
+            self.assertEqual("/opt/perl/bin/perl", cmd[0])
             name = cmd[1][2:]
             code = 2 if name == "Time::Piece" else 0
             return subprocess.CompletedProcess(cmd, code, "", "")
 
         with self.assertRaises(build_openssl.BuildError) as caught:
-            build_openssl.require_perl_modules(fail_run)
+            build_openssl.require_perl_modules("/opt/perl/bin/perl", fail_run)
         self.assertIn("Time::Piece", str(caught.exception))
         self.assertIn("perl-core", str(caught.exception))
 
         def ok_run(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
-        build_openssl.require_perl_modules(ok_run)
+        build_openssl.require_perl_modules("/opt/perl/bin/perl", ok_run)
 
     def test_windows_perl_rejects_msys(self):
         build_openssl.require_perl((5, 26, 3), "linux", "linux")
@@ -199,6 +273,7 @@ class BuildOpensslTest(unittest.TestCase):
         with self.assertRaises(build_openssl.BuildError) as caught:
             build_openssl.require_perl((5, 32, 1), "msys", "windows")
         self.assertIn("MSWin32", str(caught.exception))
+        self.assertIn("strawberry-perl", str(caught.exception))
         with self.assertRaises(build_openssl.BuildError):
             build_openssl.require_perl((5, 8, 9), "linux", "linux")
 
