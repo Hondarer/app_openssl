@@ -58,6 +58,51 @@ Windows の静的ビルドは `OPENSSL_OPT_WINDLL` を定義せず、`OPENSSL_EX
 実行ファイルや DLL をリンクするとき、利用側の `MSVC_CRT` が CRT を選びます。  
 Windows で追加するシステム ライブラリは `ws2_32.lib`、`gdi32.lib`、`advapi32.lib`、`crypt32.lib`、`user32.lib` です。
 
+## 単体テスト用のモック
+
+OpenSSL の関数の失敗を単体テストで注入するため、Google Mock に対応したモックを提供します。  
+静的ライブラリの関数はリンク時に差し替えられないため、テスト対象のソースが取り込む OpenSSL のヘッダーを差し替え、呼び出しをマクロで mock 関数へ置き換えます。
+
+| パス | 内容 |
+|---|---|
+| `test/include/mock_openssl.h` | `Mock_openssl` クラスと mock 関数の宣言、置換マクロ |
+| `test/include_override/openssl/evp.h`、`rand.h` | 実ヘッダーを取り込んだ後に置換マクロを定義する override ヘッダー |
+| `test/libsrc/mock_openssl/` | mock 関数の実装。`test/lib/libmock_openssl.a` を作る |
+
+Table: モックの構成
+
+makefw は、テストする app と依存先の app の `test/include_override/` を、テスト対象 (`TEST_SRCS`) のコンパイルだけに追加します。  
+このため、`APP_DEPS` で openssl を取り込んだ app のテスト対象は、`<openssl/evp.h>` と `<openssl/rand.h>` を取り込むと置き換えの対象になります。  
+テスト コードとモック本体は置き換えません。
+
+置き換える関数は次のとおりです。
+
+- `EVP_CIPHER_CTX_new`、`EVP_CIPHER_CTX_ctrl`
+- `EVP_EncryptInit_ex`、`EVP_EncryptUpdate`、`EVP_EncryptFinal_ex`
+- `EVP_DecryptInit_ex`、`EVP_DecryptUpdate`、`EVP_DecryptFinal_ex`
+- `EVP_MD_CTX_new`、`EVP_DigestInit_ex`、`EVP_DigestUpdate`、`EVP_DigestFinal_ex`
+- `RAND_bytes`
+
+テストの `makepart.mk` には `LIBS += mock_openssl crypto` を指定します。  
+`mock_openssl` を `crypto` より前に置き、mock 関数が呼ぶ実関数を静的な libcrypto から解決します。  
+置き換え対象のヘッダーを取り込むテスト対象を持つテストは、モックを生成しない場合も `mock_openssl` をリンクしてください。  
+リンクしないと、置き換えた `mock_<関数名>` が未解決になります。
+
+```cpp
+#include <mock_openssl.h>
+
+NiceMock<Mock_openssl> mock_openssl;
+EXPECT_CALL(mock_openssl, RAND_bytes(_, _, _, _, _)).WillOnce(Return(0));
+```
+
+モックを生成しない場合と、個別の動作を設定していない場合は、OpenSSL の実関数へ委譲します。  
+mock 関数の先頭 3 引数は、呼び出し元のファイル名、行番号、関数名です。  
+同時に生成できる `Mock_openssl` は 1 個です。
+
+override ヘッダーは GCC の `#include_next` で実ヘッダーを取り込むため、モックは Linux だけでビルドします。  
+関数を追加する場合は、`mock_openssl.h` の宣言、置換マクロ、`MOCK_METHOD`、`mock_openssl.cc` の `ON_CALL`、関数ごとの `.cc` を同時に更新します。  
+override ヘッダーを新設した場合は、既存の依存ファイル (`.d`) に反映されないため、影響するテストの `obj/` を削除してから再ビルドしてください。
+
 ## ビルドと更新
 
 ```sh
@@ -86,12 +131,13 @@ Configure と、アセンブラー ソースの生成には Perl が必要です
 
 | 環境 | ツール |
 |---|---|
-| Linux | GCC、GNU アセンブラー、make、Perl 5.10 以上 (`IPC::Cmd` と `Time::Piece` を含む) |
+| Linux | GCC、GNU アセンブラー、make、Perl 5.10 以上 (`FindBin`、`IPC::Cmd`、`Time::Piece` を含む) |
 | Windows | Visual Studio の C/C++ ビルド ツール (`cl`、`nmake`、`lib`)、NASM 2.13.3 以上、`strawberry-perl` |
 
 Table: 環境別の OpenSSL のビルドに必要なツール
 
-RPM 系の Linux では、`perl` パッケージだけでは Perl のモジュールが足りないため、`perl-core` を導入します ([NOTES-PERL.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md))。
+RPM 系の Linux では、`perl` パッケージだけでは Perl のモジュールが足りないため、`perl-core` を導入します ([NOTES-PERL.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md))。  
+個別に導入する場合は `perl-IPC-Cmd` と `perl-Time-Piece` を入れ、EL9 以降は `perl-FindBin` も入れます。
 
 Windows の Configure には、`osname` が `MSWin32` となる Perl が必要です ([NOTES-WINDOWS.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md))。  
 Git 付属の Perl (`msys`) は使えません。  
