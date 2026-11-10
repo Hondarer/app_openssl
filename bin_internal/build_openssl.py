@@ -42,6 +42,9 @@ PACKAGE_PATTERN = re.compile(r"^openssl-(\d+)\.(\d+)\.(\d+)\.tar\.gz$", re.IGNOR
 # no-autoload-config は、OPENSSLDIR の openssl.cnf を初期化時に自動で読まない。
 # OPENSSLDIR はビルドした場所の絶対パスになるため、配布先でそのパスを作れる利用者が
 # 設定を差し込めないようにする。
+# no-padlockeng は、VIA の CPU 専用の PadLock エンジン (engines/e_padlock.c) を作らない。
+# ENGINE API は OpenSSL 3.0 で非推奨であり、利用側は使わない。GCC 14 の -O3 では、
+# padlock_cfb_cipher の 16 バイト未満の端数の処理に -Wstringop-overflow の誤検出が出る。
 # enable-tls1_3 と enable-dtls1_2 は既定で有効な機能を明示する。
 # see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md
 FEATURE_ARGS = [
@@ -51,6 +54,7 @@ FEATURE_ARGS = [
     "no-apps",
     "no-docs",
     "no-makedepend",
+    "no-padlockeng",
     "enable-tls1_3",
     "enable-dtls1_2",
 ]

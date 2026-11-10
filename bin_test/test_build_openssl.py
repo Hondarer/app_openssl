@@ -23,6 +23,7 @@ class BuildOpensslTest(unittest.TestCase):
                 "no-apps",
                 "no-docs",
                 "no-makedepend",
+                "no-padlockeng",
                 "enable-tls1_3",
                 "enable-dtls1_2",
             ],

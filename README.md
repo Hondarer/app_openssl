@@ -29,12 +29,16 @@ Configure には、[INSTALL.md](https://github.com/openssl/openssl/blob/openssl-
 | `no-shared` | 静的ライブラリだけを作る |
 | `no-pinshared` | 静的 libcrypto を利用側の共有ライブラリへ入れたとき、その共有ライブラリをプロセス終了まで固定しない |
 | `no-autoload-config` | 初期化時に `openssl.cnf` を自動で読まない |
+| `no-padlockeng` | VIA の CPU 専用の PadLock エンジンを作らない |
 
 Table: Configure に渡す主なオプションと理由
 
 `no-autoload-config` を指定する理由は、設定ファイルの場所 (OPENSSLDIR) にビルドした場所の絶対パスが埋め込まれるためです。  
 自動で読む設定にすると、配布先でそのパスを作れる利用者が、設定を差し込めます。  
 証明書の既定の場所も同じパスを指すため、利用側は CA 証明書のファイルを明示して指定してください。
+
+PadLock エンジンは、OpenSSL 3.0 で非推奨となった ENGINE API の機能です。  
+GCC 14 で最適化すると、このエンジンのソースに誤った警告 (`-Wstringop-overflow`) が出ます。
 
 ほかの app から利用する場合は、その app の `appdeps.mk` に `APP_DEPS += openssl` を記載し、対象の `makepart.mk` にリンク指定を追加します。  
 リンク順は ssl の次が crypto です。  
