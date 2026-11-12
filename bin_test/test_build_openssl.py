@@ -554,7 +554,7 @@ class BuildOpensslTest(unittest.TestCase):
             # Linux では import library が無いため、何もしない。
             build_openssl.assert_import_lib(path, "linux", "crypto")
 
-    @unittest.skipIf(os.name == "nt", "[Windows] シンボリック リンクの作成に特権が必要なため。")
+    @unittest.skipIf(os.name == "nt", "[Linux] Windows ではシンボリック リンクの作成に特権が必要なため。")
     def test_place_link_lib_linux_creates_relative_symlink(self):
         with tempfile.TemporaryDirectory(prefix="openssl-link-") as temporary:
             root = Path(temporary)
@@ -590,7 +590,7 @@ class BuildOpensslTest(unittest.TestCase):
             with self.assertRaises(build_openssl.BuildError):
                 build_openssl.place_link_lib(source, dest, "windows", "ssl")
 
-    @unittest.skipIf(os.name == "nt", "[Windows] シンボリック リンクの作成に特権が必要なため。")
+    @unittest.skipIf(os.name == "nt", "[Linux] Windows ではシンボリック リンクの作成に特権が必要なため。")
     def test_remove_product_libs_removes_current_and_legacy_names(self):
         with tempfile.TemporaryDirectory(prefix="openssl-remove-") as temporary:
             app = Path(temporary)
