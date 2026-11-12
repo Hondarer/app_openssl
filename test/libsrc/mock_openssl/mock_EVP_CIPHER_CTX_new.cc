@@ -1,4 +1,5 @@
 #include <test_com.h>
+#include <sharedLibrary.h>
 #include <mock_openssl.h>
 
 using namespace testing;
@@ -10,7 +11,9 @@ EVP_CIPHER_CTX *delegate_real_EVP_CIPHER_CTX_new(const char *file, const int lin
     (void)line;
     (void)func;
 
-    return EVP_CIPHER_CTX_new();
+    static auto real_fn = reinterpret_cast<decltype(&EVP_CIPHER_CTX_new)>(
+        resolveSharedSymbolOrExit(kLibCryptoName, "EVP_CIPHER_CTX_new"));
+    return real_fn();
 }
 
 EVP_CIPHER_CTX *mock_EVP_CIPHER_CTX_new(const char *file, const int line, const char *func)

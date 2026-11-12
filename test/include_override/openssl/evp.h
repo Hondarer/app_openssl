@@ -2,14 +2,32 @@
 #define _OVERRIDE_OPENSSL_EVP_H
 
 /*
- * OpenSSL の実ヘッダーが相互に別のヘッダーを include する場合は、
- * 実ヘッダーの読み込みが完了するまでモックの注入を遅延する。
+ * OpenSSL の実ヘッダーの取り込み方。
+ * Linux は #include_next を使う。MSVC には #include_next がないため、Windows は
+ * include パス (app/openssl/prod/include) からの相対パスで実ヘッダーを指定する。
+ *
+ * 実ヘッダーが別の OpenSSL のヘッダーを取り込む場合は、実ヘッダーの読み込みが完了するまで
+ * mock の注入を遅延する。
  */
 #if defined(_IN_OVERRIDE_OPENSSL_REAL_HEADERS)
-    #include_next <openssl/evp.h>
+    #ifndef _WIN32
+        #include_next <openssl/evp.h>
+    #else
+        #include <../include/openssl/evp.h>
+    #endif
 #else
+    /*
+     * 置換マクロを定義する前に、mock が置き換える関数を宣言する実ヘッダーをすべて取り込む。
+     * 置換マクロの定義後に実ヘッダーが取り込まれると、関数宣言がマクロで書き換えられる。
+     */
     #define _IN_OVERRIDE_OPENSSL_REAL_HEADERS
-    #include_next <openssl/evp.h>
+    #ifndef _WIN32
+        #include_next <openssl/evp.h>
+        #include_next <openssl/rand.h>
+    #else
+        #include <../include/openssl/evp.h>
+        #include <../include/openssl/rand.h>
+    #endif
     #undef _IN_OVERRIDE_OPENSSL_REAL_HEADERS
 
     /* モックにすげ替え */

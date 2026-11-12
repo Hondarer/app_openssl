@@ -2,6 +2,7 @@
 """OpenSSL ビルドスクリプトの引数、ハッシュ、ツール判定を検証する。"""
 
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,11 +15,10 @@ import build_openssl
 
 
 class BuildOpensslTest(unittest.TestCase):
-    def test_feature_args_keep_static_asm_and_protocols(self):
+    def test_feature_args_keep_shared_asm_and_protocols(self):
         self.assertEqual(
             [
-                "no-shared",
-                "no-pinshared",
+                "shared",
                 "no-autoload-config",
                 "no-apps",
                 "no-docs",
@@ -29,6 +29,8 @@ class BuildOpensslTest(unittest.TestCase):
             ],
             build_openssl.FEATURE_ARGS,
         )
+        self.assertNotIn("no-shared", build_openssl.FEATURE_ARGS)
+        self.assertNotIn("no-pinshared", build_openssl.FEATURE_ARGS)
         self.assertNotIn("no-asm", build_openssl.FEATURE_ARGS)
         self.assertNotIn("no-pic", build_openssl.FEATURE_ARGS)
 
@@ -39,10 +41,13 @@ class BuildOpensslTest(unittest.TestCase):
             "RelWithDebInfo",
             Path("/opt/openssl/install"),
             Path("/opt/openssl/install/ssl"),
+            Path("/opt/openssl/gen/variant.conf"),
         )
-        self.assertEqual("linux-x86_64", args[0])
-        self.assertIn("no-shared", args)
-        self.assertIn("no-pinshared", args)
+        self.assertEqual("linux-x86_64-app", args[0])
+        self.assertIn("shared", args)
+        self.assertNotIn("no-shared", args)
+        self.assertNotIn("no-pinshared", args)
+        self.assertIn("--config=/opt/openssl/gen/variant.conf", args)
         self.assertIn("enable-tls1_3", args)
         self.assertIn("enable-dtls1_2", args)
         self.assertIn("--prefix=/opt/openssl/install", args)
@@ -62,9 +67,10 @@ class BuildOpensslTest(unittest.TestCase):
             "Debug",
             Path("C:/src/openssl/install"),
             Path("C:/src/openssl/install/ssl"),
+            Path("C:/src/openssl/gen/variant.conf"),
             linker,
         )
-        self.assertEqual("VC-WIN64A", args[0])
+        self.assertEqual("VC-WIN64A-app", args[0])
         self.assertIn("--debug", args)
         # PATH 上の GNU coreutils の link を使わないよう、LD を絶対パスで渡す。
         self.assertIn(f"LD={linker}", args)
@@ -75,6 +81,7 @@ class BuildOpensslTest(unittest.TestCase):
                 "Release",
                 Path("C:/src/openssl/install"),
                 Path("C:/src/openssl/install/ssl"),
+                Path("C:/src/openssl/gen/variant.conf"),
             )
         self.assertNotIn("-fPIC", args)
         # 本体由来の警告の抑制と、ソースの文字コードの指定は Windows だけに渡す。
@@ -89,6 +96,7 @@ class BuildOpensslTest(unittest.TestCase):
             "Debug",
             Path("/opt/openssl/install"),
             Path("/opt/openssl/install/ssl"),
+            Path("/opt/openssl/gen/variant.conf"),
         )
         self.assertFalse(set(build_openssl.WINDOWS_COMPILER_ARGS) & set(linux_args))
         self.assertFalse([arg for arg in linux_args if arg.startswith("LD=")])
@@ -99,6 +107,7 @@ class BuildOpensslTest(unittest.TestCase):
                 "Release",
                 Path("C:/src/openssl/install"),
                 Path("C:/src/openssl/install/ssl"),
+                Path("C:/src/openssl/gen/variant.conf"),
                 linker,
             )
 
@@ -132,6 +141,16 @@ class BuildOpensslTest(unittest.TestCase):
                 "RelWithDebInfo",
                 Path("/opt/my openssl/install"),
                 Path("/opt/my openssl/install/ssl"),
+                Path("/opt/openssl/gen/variant.conf"),
+            )
+        with self.assertRaises(build_openssl.BuildError):
+            build_openssl.configure_args(
+                "linux",
+                "x86_64",
+                "RelWithDebInfo",
+                Path("/opt/openssl/install"),
+                Path("/opt/openssl/install/ssl"),
+                Path("/opt/my openssl/gen/variant.conf"),
             )
         with self.assertRaises(build_openssl.BuildError):
             build_openssl.configure_args(
@@ -140,6 +159,7 @@ class BuildOpensslTest(unittest.TestCase):
                 "DebugInfo",
                 Path("/opt/openssl/install"),
                 Path("/opt/openssl/install/ssl"),
+                Path("/opt/openssl/gen/variant.conf"),
             )
 
     def test_select_package_name(self):
@@ -339,8 +359,7 @@ class BuildOpensslTest(unittest.TestCase):
         )
         self.assertNotIn("enable-tls1_3", reduced)
         self.assertNotIn("enable-dtls1_2", reduced)
-        self.assertIn("no-shared", reduced)
-        self.assertIn("no-pinshared", reduced)
+        self.assertIn("shared", reduced)
         self.assertIsNone(build_openssl.drop_unsupported_enables(args, b"some other error"))
 
     def test_clean_removes_products_and_keeps_include_gitignore(self):
@@ -377,24 +396,32 @@ class BuildOpensslTest(unittest.TestCase):
                 (include / ".gitignore").read_text(encoding="utf-8"),
             )
 
-    def test_copy_pdbs_places_only_static_library_pdb(self):
+    def test_copy_pdbs_places_only_dll_pdb(self):
         with tempfile.TemporaryDirectory(prefix="openssl-pdb-") as temporary:
             root = Path(temporary)
             source = root / "src"
             source.mkdir()
-            for name in ("ossl_static.pdb", "dso.pdb"):
+            names = [
+                build_openssl.runtime_lib_name("windows", base).replace(".dll", ".pdb")
+                for base in build_openssl.SHLIB_BASE_NAMES
+            ]
+            for name in (*names, "ossl_static.pdb", "dso.pdb"):
                 (source / name).write_bytes(b"pdb")
             dest = root / "lib"
-            build_openssl.copy_pdbs(source, root / "install" / "lib", dest)
-            self.assertEqual(["ossl_static.pdb"], sorted(path.name for path in dest.iterdir()))
-            self.assertIn("dso.pdb", build_openssl.PRODUCT_LIB_NAMES)
+            build_openssl.copy_pdbs(source, dest, "windows")
+            self.assertEqual(sorted(names), sorted(path.name for path in dest.iterdir()))
+            self.assertIn("libcrypto-3-x64_app.pdb", names)
+            # Linux には PDB が無いため、何も配置しない。
+            linux_dest = root / "linux-lib"
+            build_openssl.copy_pdbs(source, linux_dest, "linux")
+            self.assertFalse(linux_dest.exists())
 
     def test_outputs_ready_requires_license(self):
         with tempfile.TemporaryDirectory(prefix="openssl-ready-") as temporary:
             app = Path(temporary)
             lib = app / "prod" / "lib"
             lib.mkdir(parents=True)
-            for name in build_openssl.static_lib_names("linux"):
+            for name in build_openssl.product_lib_names("linux"):
                 (lib / name).write_bytes(b"lib")
             headers = app / "prod" / "include" / "openssl"
             headers.mkdir(parents=True)
@@ -406,6 +433,180 @@ class BuildOpensslTest(unittest.TestCase):
             license_path.parent.mkdir(parents=True)
             license_path.write_text("Apache License\n", encoding="utf-8", newline="\n")
             self.assertTrue(build_openssl.outputs_ready(app, "linux"))
+
+    def test_outputs_ready_rejects_legacy_products(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-legacy-") as temporary:
+            app = Path(temporary)
+            lib = app / "prod" / "lib"
+            lib.mkdir(parents=True)
+            for name in build_openssl.product_lib_names("linux"):
+                (lib / name).write_bytes(b"lib")
+            headers = app / "prod" / "include" / "openssl"
+            headers.mkdir(parents=True)
+            for name in ("ssl.h", "configuration.h", "opensslv.h"):
+                (headers / name).write_text("header\n", encoding="utf-8", newline="\n")
+            license_path = app.joinpath(*build_openssl.LICENSE_RELATIVE)
+            license_path.parent.mkdir(parents=True)
+            license_path.write_text("Apache License\n", encoding="utf-8", newline="\n")
+            self.assertTrue(build_openssl.outputs_ready(app, "linux"))
+            # 以前の名前の成果物が残っていれば、成果物はそろっていない。
+            (lib / "libcrypto.a").write_bytes(b"old")
+            self.assertFalse(build_openssl.outputs_ready(app, "linux"))
+
+    def test_variant_target_name_and_base_target_name_are_inverse(self):
+        for base in ("linux-x86_64", "linux-aarch64", "VC-WIN64A"):
+            variant = build_openssl.variant_target_name(base)
+            self.assertEqual(base + "-app", variant)
+            self.assertEqual(base, build_openssl.base_target_name(variant))
+        # 変種でない名前は、そのまま返す。
+        self.assertEqual("linux-x86_64", build_openssl.base_target_name("linux-x86_64"))
+
+    def test_variant_config_text_inherits_target_with_shlib_variant(self):
+        text = build_openssl.variant_config_text("linux-x86_64")
+        self.assertIn('"linux-x86_64-app" =>', text)
+        self.assertIn('inherit_from  => [ "linux-x86_64" ]', text)
+        self.assertIn('shlib_variant => "_app"', text)
+        self.assertIn("my %targets", text)
+
+    def test_lib_names_per_platform(self):
+        expected = {
+            "linux": ("libcrypto_app.so.3", "libcrypto_app.so", "libcrypto.so", "libcrypto.a"),
+            "windows": (
+                "libcrypto-3-x64_app.dll",
+                "libcrypto_app.lib",
+                "libcrypto.lib",
+                "libcrypto_static.lib",
+            ),
+        }
+        for platform, (runtime, link, upstream, static) in expected.items():
+            self.assertEqual(runtime, build_openssl.runtime_lib_name(platform, "crypto"))
+            self.assertEqual(link, build_openssl.link_lib_name(platform, "crypto"))
+            self.assertEqual(upstream, build_openssl.upstream_link_lib_name(platform, "crypto"))
+            self.assertEqual(static, build_openssl.static_archive_name(platform, "crypto"))
+        self.assertEqual("libssl_app.so.3", build_openssl.runtime_lib_name("linux", "ssl"))
+        for function in (
+            build_openssl.runtime_lib_name,
+            build_openssl.link_lib_name,
+            build_openssl.upstream_link_lib_name,
+            build_openssl.static_archive_name,
+        ):
+            with self.assertRaises(build_openssl.BuildError):
+                function("macos", "crypto")
+
+    def test_product_lib_names(self):
+        self.assertEqual(
+            (
+                "libcrypto_app.so.3",
+                "libcrypto_app.so",
+                "libssl_app.so.3",
+                "libssl_app.so",
+            ),
+            build_openssl.product_lib_names("linux"),
+        )
+        self.assertEqual(
+            (
+                "libcrypto-3-x64_app.dll",
+                "libcrypto_app.lib",
+                "libssl-3-x64_app.dll",
+                "libssl_app.lib",
+            ),
+            build_openssl.product_lib_names("windows"),
+        )
+        with self.assertRaises(build_openssl.BuildError):
+            build_openssl.product_lib_names("macos")
+
+    def test_assert_shared_variant_linux(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-variant-") as temporary:
+            path = Path(temporary) / "libcrypto_app.so.3"
+            good = b"\0libcrypto_app.so.3\0OPENSSL_APP_3.0.0\0"
+            path.write_bytes(good)
+            build_openssl.assert_shared_variant(path, "linux", "crypto")
+            # SONAME の文字列が無い。
+            path.write_bytes(b"\0OPENSSL_APP_3.0.0\0")
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_shared_variant(path, "linux", "crypto")
+            # OPENSSL_APP_3.0.0 が無い。
+            path.write_bytes(b"\0libcrypto_app.so.3\0")
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_shared_variant(path, "linux", "crypto")
+            # 標準の OPENSSL_3.0.0 が残っている。
+            path.write_bytes(good + b"OPENSSL_3.0.0\0")
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_shared_variant(path, "linux", "crypto")
+
+    def test_assert_shared_variant_windows_checks_only_dll_name(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-variant-") as temporary:
+            path = Path(temporary) / "libcrypto-3-x64_app.dll"
+            path.write_bytes(b"MZ\0libcrypto-3-x64_app.dll\0")
+            build_openssl.assert_shared_variant(path, "windows", "crypto")
+            path.write_bytes(b"MZ\0libcrypto-3-x64.dll\0")
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_shared_variant(path, "windows", "crypto")
+
+    def test_assert_import_lib(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-import-") as temporary:
+            path = Path(temporary) / "libcrypto.lib"
+            path.write_bytes(b"!<arch>\nlibcrypto-3-x64_app.dll\0")
+            build_openssl.assert_import_lib(path, "windows", "crypto")
+            path.write_bytes(b"!<arch>\nlibcrypto-3-x64.dll\0")
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.assert_import_lib(path, "windows", "crypto")
+            # Linux では import library が無いため、何もしない。
+            build_openssl.assert_import_lib(path, "linux", "crypto")
+
+    @unittest.skipIf(os.name == "nt", "[Windows] シンボリック リンクの作成に特権が必要なため。")
+    def test_place_link_lib_linux_creates_relative_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-link-") as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            source.mkdir()
+            dest = root / "lib"
+            dest.mkdir()
+            runtime = dest / "libcrypto_app.so.3"
+            runtime.write_bytes(b"so")
+            link = dest / "libcrypto_app.so"
+            build_openssl.place_link_lib(source, dest, "linux", "crypto")
+            self.assertTrue(link.is_symlink())
+            self.assertEqual("libcrypto_app.so.3", os.readlink(link))
+            self.assertEqual(b"so", link.read_bytes())
+            # 既存のリンクがあっても置き換える。
+            link.unlink()
+            os.symlink("stale-target", link)
+            build_openssl.place_link_lib(source, dest, "linux", "crypto")
+            self.assertEqual("libcrypto_app.so.3", os.readlink(link))
+            self.assertFalse((dest / "libcrypto_app.so.tmp").exists())
+
+    def test_place_link_lib_windows_copies_import_library(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-link-") as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            source.mkdir()
+            dest = root / "lib"
+            content = b"!<arch>\nlibcrypto-3-x64_app.dll\0"
+            (source / "libcrypto.lib").write_bytes(content)
+            build_openssl.place_link_lib(source, dest, "windows", "crypto")
+            self.assertEqual(content, (dest / "libcrypto_app.lib").read_bytes())
+            # 元のファイルが無ければ止める。
+            with self.assertRaises(build_openssl.BuildError):
+                build_openssl.place_link_lib(source, dest, "windows", "ssl")
+
+    @unittest.skipIf(os.name == "nt", "[Windows] シンボリック リンクの作成に特権が必要なため。")
+    def test_remove_product_libs_removes_current_and_legacy_names(self):
+        with tempfile.TemporaryDirectory(prefix="openssl-remove-") as temporary:
+            app = Path(temporary)
+            lib = app / "prod" / "lib"
+            lib.mkdir(parents=True)
+            (lib / "libcrypto_app.so.3").write_bytes(b"so")
+            os.symlink("libcrypto_app.so.3", lib / "libcrypto_app.so")
+            (lib / "libssl-3-x64_app.dll").write_bytes(b"dll")
+            (lib / "libcrypto_app.lib").write_bytes(b"lib")
+            for name in build_openssl.LEGACY_PRODUCT_LIB_NAMES:
+                (lib / name).write_bytes(b"old")
+            (lib / "libother.so").write_bytes(b"other")
+            build_openssl.remove_product_libs(app)
+            self.assertEqual(["libother.so"], sorted(path.name for path in lib.iterdir()))
+            # prod/lib が無くても失敗しない。
+            build_openssl.remove_product_libs(app / "missing")
 
     def test_defined_macros_ignore_comments_and_undef(self):
         data = b"\n".join([

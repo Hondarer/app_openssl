@@ -1,4 +1,5 @@
 #include <test_com.h>
+#include <sharedLibrary.h>
 #include <mock_openssl.h>
 
 using namespace testing;
@@ -12,7 +13,9 @@ int delegate_real_EVP_EncryptInit_ex(const char *file, const int line, const cha
     (void)line;
     (void)func;
 
-    return EVP_EncryptInit_ex(ctx, type, impl, key, iv);
+    static auto real_fn = reinterpret_cast<decltype(&EVP_EncryptInit_ex)>(
+        resolveSharedSymbolOrExit(kLibCryptoName, "EVP_EncryptInit_ex"));
+    return real_fn(ctx, type, impl, key, iv);
 }
 
 int mock_EVP_EncryptInit_ex(const char *file, const int line, const char *func, EVP_CIPHER_CTX *ctx,

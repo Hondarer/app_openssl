@@ -26,6 +26,7 @@ GitHub が推奨する 50[MiB] を超えるため、このファイルを含む�
 対応表にないファイル名が混在する場合は、ビルドを停止します。  
 アーカイブがない場合は、配置方法を表示してビルドを停止します。
 
-更新後は `make -C app/openssl clean` で以前の成果物を削除し、`make -C app/openssl` で静的ライブラリを作り直します。  
+更新後は `make -C app/openssl clean` で以前の成果物を削除し、`make -C app/openssl` で共有ライブラリを作り直します。  
+OpenSSL のメジャー バージョンが変わると、共有ライブラリの版の番号 (`libcrypto_app.so.3` の `3`) が変わります。その場合は、`bin_internal/build_openssl.py` の `SHLIB_VERSION` と、`test/include/mock_openssl.h` の `kLibCryptoName` を合わせて変更します。  
 ビルド スクリプトは、配置した `libcrypto` にアセンブラー成果物が含まれることと、`configuration.h` の機能の有効・無効を確認します。  
 Windows でも同じ make を、Visual Studio の C/C++ ビルド ツールを使える環境で実行します。

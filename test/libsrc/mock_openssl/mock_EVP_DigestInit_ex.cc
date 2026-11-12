@@ -1,4 +1,5 @@
 #include <test_com.h>
+#include <sharedLibrary.h>
 #include <mock_openssl.h>
 
 using namespace testing;
@@ -11,7 +12,9 @@ int delegate_real_EVP_DigestInit_ex(const char *file, const int line, const char
     (void)line;
     (void)func;
 
-    return EVP_DigestInit_ex(ctx, type, impl);
+    static auto real_fn =
+        reinterpret_cast<decltype(&EVP_DigestInit_ex)>(resolveSharedSymbolOrExit(kLibCryptoName, "EVP_DigestInit_ex"));
+    return real_fn(ctx, type, impl);
 }
 
 int mock_EVP_DigestInit_ex(const char *file, const int line, const char *func, EVP_MD_CTX *ctx, const EVP_MD *type,

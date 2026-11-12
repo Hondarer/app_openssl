@@ -1,4 +1,5 @@
 #include <test_com.h>
+#include <sharedLibrary.h>
 #include <mock_openssl.h>
 
 using namespace testing;
@@ -10,7 +11,9 @@ int delegate_real_RAND_bytes(const char *file, const int line, const char *func,
     (void)line;
     (void)func;
 
-    return RAND_bytes(buf, num);
+    static auto real_fn =
+        reinterpret_cast<decltype(&RAND_bytes)>(resolveSharedSymbolOrExit(kLibCryptoName, "RAND_bytes"));
+    return real_fn(buf, num);
 }
 
 int mock_RAND_bytes(const char *file, const int line, const char *func, unsigned char *buf, int num)

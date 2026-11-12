@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""OpenSSL の公式アーカイブを Configure で静的ビルドし、prod へ配置する。
+"""OpenSSL の公式アーカイブを Configure で共有ライブラリとしてビルドし、prod へ配置する。
 
 makefw は OpenSSL のソースをコンパイルしない。アセンブルは OpenSSL 自身の
-Makefile が行う。共有ライブラリは作らない。
+Makefile が行う。静的ライブラリは配置しない。
+共有ライブラリの名前とシンボル バージョンには、shlib_variant で識別子 _app を付ける。
 
 see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md
 see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-WINDOWS.md
 see: https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md
 see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/10-main.conf
+see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/README.md
 see: https://github.com/openssl/openssl/blob/openssl-3.5.9/include/openssl/e_os2.h
 """
 
@@ -37,8 +39,7 @@ EXPECTED_SHA256 = {
         "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
 }
 PACKAGE_PATTERN = re.compile(r"^openssl-(\d+)\.(\d+)\.(\d+)\.tar\.gz$", re.IGNORECASE)
-# no-shared は静的ライブラリだけを作る。no-pinshared は、その静的ライブラリを
-# 利用側の共有ライブラリへ入れたときにプロセスへ OpenSSL を固定しないための指定。
+# shared は共有ライブラリを作る。
 # no-autoload-config は、OPENSSLDIR の openssl.cnf を初期化時に自動で読まない。
 # OPENSSLDIR はビルドした場所の絶対パスになるため、配布先でそのパスを作れる利用者が
 # 設定を差し込めないようにする。
@@ -48,8 +49,7 @@ PACKAGE_PATTERN = re.compile(r"^openssl-(\d+)\.(\d+)\.(\d+)\.tar\.gz$", re.IGNOR
 # enable-tls1_3 と enable-dtls1_2 は既定で有効な機能を明示する。
 # see: https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md
 FEATURE_ARGS = [
-    "no-shared",
-    "no-pinshared",
+    "shared",
     "no-autoload-config",
     "no-apps",
     "no-docs",
@@ -107,22 +107,34 @@ DISABLED_MACROS = (
 REQUIRED_MACROS = (
     b"OPENSSL_NO_AUTOLOAD_CONFIG",
 )
-PRODUCT_LIB_NAMES = (
+# 第三者管理ライブラリは、OS やほかの製品の同名ライブラリと区別するため、名前に接尾辞 _app を付ける。
+# OpenSSL では、Configure のターゲット定義の shlib_variant にこの識別子を指定する。
+# shlib_variant は、共有ライブラリのファイル名、SONAME、シンボル バージョンに反映される。
+# シンボル バージョンは OPENSSL_<版> から OPENSSL_APP_<版> に変わるため、同じプロセスに
+# OS の OpenSSL が読み込まれても、利用側の呼び出しが相手のライブラリへ束縛されない。
+# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/README.md
+SHLIB_VARIANT = "_app"
+# 共有ライブラリの版の番号。OpenSSL の VERSION.dat の SHLIB_VERSION に対応する。
+# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/VERSION.dat
+SHLIB_VERSION = "3"
+SHLIB_BASE_NAMES = ("crypto", "ssl")
+# shlib_variant から決まるシンボル バージョンの接頭辞と、付いてはならない標準の接頭辞。
+VARIANT_SYMBOL_VERSION = f"OPENSSL_APP_{SHLIB_VERSION}.0.0".encode("ascii")
+DEFAULT_SYMBOL_VERSION = f"OPENSSL_{SHLIB_VERSION}.0.0".encode("ascii")
+# 以前の版が配置した成果物の名前。ビルドと clean で削除する。
+LEGACY_PRODUCT_LIB_NAMES = (
     "libcrypto.a",
     "libssl.a",
     "libcrypto.lib",
     "libssl.lib",
-    "libcrypto.so",
-    "libssl.so",
     "libcrypto.dll",
     "libssl.dll",
     "libcrypto.pdb",
     "libssl.pdb",
     "ossl_static.pdb",
-    # 以前の版が誤って配置した DSO のデバッグ情報。clean で削除する。
     "dso.pdb",
 )
-# 静的ライブラリとともに配布するライセンス文。アーカイブの LICENSE.txt を
+# 共有ライブラリとともに配布するライセンス文。アーカイブの LICENSE.txt を
 # zlib や cjson と同じくライブラリのディレクトリへ配置する。NOTICE ファイルは同梱されない。
 LICENSE_NAME = "LICENSE.txt"
 LICENSE_RELATIVE = ("prod", "libsrc", "openssl", LICENSE_NAME)
@@ -252,23 +264,51 @@ def find_msvc_linker(which=None):
     return str(linker)
 
 
-def configure_args(platform, machine, config, prefix, openssldir, linker=None):
+def variant_target_name(base_target):
+    """shlib_variant を追加したターゲット定義の名前。"""
+    return base_target + "-app"
+
+
+def base_target_name(target):
+    """variant_target_name の逆。OpenSSL が定義する元のターゲット名を返す。"""
+    suffix = "-app"
+    return target[:-len(suffix)] if target.endswith(suffix) else target
+
+
+def variant_config_text(base_target):
+    """元のターゲットを継承し、shlib_variant だけを追加するターゲット定義。
+
+    Configure の --config で渡すため、OpenSSL 本体にはパッチを当てない。
+    """
+    return (
+        "# build_openssl.py が生成する。直接編集しない。\n"
+        "my %targets = (\n"
+        f'    "{variant_target_name(base_target)}" => {{\n'
+        f'        inherit_from  => [ "{base_target}" ],\n'
+        f'        shlib_variant => "{SHLIB_VARIANT}",\n'
+        "    },\n"
+        ");\n"
+    )
+
+
+def configure_args(platform, machine, config, prefix, openssldir, variant_config, linker=None):
     """Configure に渡す引数。no-asm と no-pic は渡さない。
 
-    Linux の静的ライブラリは、OpenSSL が既定で LIB_CFLAGS に -fPIC を付ける。
-    利用側の共有ライブラリへリンクできることは assert_pic で生成結果から確認する。
+    variant_config は variant_config_text の内容を書いたファイルのパス。
     Windows では linker (MSVC の link.exe の絶対パス) を LD として渡す。
     """
     prefix_text = prefix.as_posix()
     openssldir_text = openssldir.as_posix()
-    if " " in prefix_text or " " in openssldir_text:
+    variant_config_text_path = variant_config.as_posix()
+    if " " in prefix_text or " " in openssldir_text or " " in variant_config_text_path:
         raise BuildError("OpenSSL の prefix に空白を含められません。")
     selected = config or "RelWithDebInfo"
     if selected not in ("Debug", "Release", "RelWithDebInfo"):
         raise BuildError(f"未対応の CONFIG です: {selected}")
     args = [
-        target_name(platform, machine),
+        variant_target_name(target_name(platform, machine)),
         *FEATURE_ARGS,
+        f"--config={variant_config_text_path}",
         f"--prefix={prefix_text}",
         "--libdir=lib",
         f"--openssldir={openssldir_text}",
@@ -284,12 +324,49 @@ def configure_args(platform, machine, config, prefix, openssldir, linker=None):
     return args
 
 
-def static_lib_names(platform):
+def runtime_lib_name(platform, base):
+    """実行時に読み込まれる共有ライブラリのファイル名。Linux では SONAME と同じ。"""
     if platform == "windows":
-        return ("libcrypto.lib", "libssl.lib")
+        return f"lib{base}-{SHLIB_VERSION}-x64{SHLIB_VARIANT}.dll"
     if platform == "linux":
-        return ("libcrypto.a", "libssl.a")
+        return f"lib{base}{SHLIB_VARIANT}.so.{SHLIB_VERSION}"
     raise BuildError(f"未対応の OS です: {platform}")
+
+
+def link_lib_name(platform, base):
+    """リンク時に使うファイル名。利用側は LIBS += crypto_app のように指定する。"""
+    if platform == "windows":
+        return f"lib{base}{SHLIB_VARIANT}.lib"
+    if platform == "linux":
+        return f"lib{base}{SHLIB_VARIANT}.so"
+    raise BuildError(f"未対応の OS です: {platform}")
+
+
+def upstream_link_lib_name(platform, base):
+    """OpenSSL のビルドが作るリンク用のファイル名。shlib_variant は反映されない。"""
+    if platform == "windows":
+        return f"lib{base}.lib"
+    if platform == "linux":
+        return f"lib{base}.so"
+    raise BuildError(f"未対応の OS です: {platform}")
+
+
+def static_archive_name(platform, base):
+    """共有ビルドでも OpenSSL が作る静的アーカイブの名前。配置せず、検査だけに使う。"""
+    if platform == "windows":
+        return f"lib{base}_static.lib"
+    if platform == "linux":
+        return f"lib{base}.a"
+    raise BuildError(f"未対応の OS です: {platform}")
+
+
+def product_lib_names(platform):
+    """prod/lib へ配置するファイル名。実行時用、リンク用の順。"""
+    names = []
+    for base in SHLIB_BASE_NAMES:
+        names.append(runtime_lib_name(platform, base))
+        names.append(link_lib_name(platform, base))
+    return tuple(names)
 
 
 def parse_perl_version(text):
@@ -542,7 +619,9 @@ def build_identity(package_name, digest, args):
 def outputs_ready(app, platform):
     lib_dir = app / "prod" / "lib"
     include_dir = app / "prod" / "include" / "openssl"
-    if any(not (lib_dir / name).is_file() for name in static_lib_names(platform)):
+    if any(not (lib_dir / name).is_file() for name in product_lib_names(platform)):
+        return False
+    if any((lib_dir / name).exists() for name in LEGACY_PRODUCT_LIB_NAMES):
         return False
     for header in ("ssl.h", "configuration.h", "opensslv.h"):
         if not (include_dir / header).is_file():
@@ -582,18 +661,26 @@ def ensure_include_gitignore(app):
     write_text(path, INCLUDE_GITIGNORE)
 
 
-def remove_products(app):
+def remove_product_libs(app):
+    """prod/lib から、現在の名前と以前の名前の OpenSSL の成果物を削除する。"""
     lib_dir = app / "prod" / "lib"
-    if lib_dir.is_dir():
-        for name in PRODUCT_LIB_NAMES:
-            path = lib_dir / name
-            if path.is_file() or path.is_symlink():
-                path.unlink()
-        for path in list(lib_dir.iterdir()):
-            if path.is_file() and (
-                path.name.startswith("libcrypto.so") or path.name.startswith("libssl.so")
-            ):
-                path.unlink()
+    if not lib_dir.is_dir():
+        return
+    prefixes = tuple(f"lib{base}" for base in SHLIB_BASE_NAMES)
+    for path in list(lib_dir.iterdir()):
+        if not (path.is_file() or path.is_symlink()):
+            continue
+        stem = path.name.split(".", 1)[0]
+        is_current = any(
+            stem == prefix or stem.startswith((prefix + SHLIB_VARIANT, prefix + "-"))
+            for prefix in prefixes
+        )
+        if is_current or path.name in LEGACY_PRODUCT_LIB_NAMES:
+            path.unlink()
+
+
+def remove_products(app):
+    remove_product_libs(app)
     headers = app / "prod" / "include" / "openssl"
     if headers.exists():
         shutil.rmtree(headers)
@@ -703,7 +790,7 @@ def ensure_source(app, tar_path, digest):
 
 
 def drop_unsupported_enables(args, log_bytes):
-    """Configure が拒否した enable-* だけを外す。no-shared などは残す。"""
+    """Configure が拒否した enable-* だけを外す。shared などは残す。"""
     if b"Unsupported options" not in log_bytes:
         return None
     dropped = [
@@ -789,7 +876,7 @@ def assert_pic(source):
     if not any(flag in (b"-fPIC", b"-fpic") for flag in cflags) or b"-DOPENSSL_PIC" not in cppflags:
         raise BuildError(
             "Makefile の LIB_CFLAGS に -fPIC、または LIB_CPPFLAGS に -DOPENSSL_PIC がありません。"
-            " 静的ライブラリを共有ライブラリへリンクできません。"
+            " 共有ライブラリをビルドできません。"
         )
 
 
@@ -813,22 +900,45 @@ def assert_version_header(path, version):
         raise BuildError(f"{path.name} に {version} がありません。")
 
 
-def assert_no_shared(directories):
-    found = []
-    for directory in directories:
-        if not directory.is_dir():
-            continue
-        for path in directory.iterdir():
-            if not path.is_file():
-                continue
-            if re.match(r"lib(crypto|ssl)\.(so|dll|dylib)(\..*)?$", path.name):
-                found.append(str(path))
-    if found:
-        raise BuildError("共有ライブラリが生成されました:\n" + "\n".join(found))
+def assert_shared_variant(path, platform, base):
+    """共有ライブラリに shlib_variant が反映されていることを、ファイルの内容で確認する。
+
+    Linux では、SONAME の文字列と OPENSSL_APP_ のシンボル バージョンがあり、
+    標準の OPENSSL_ のシンボル バージョンが無いことを見る。
+    Windows の DLL にはシンボル バージョンが無いため、DLL が自分の名前を持つことを見る。
+    """
+    data = path.read_bytes()
+    name = runtime_lib_name(platform, base).encode("ascii")
+    if name not in data:
+        raise BuildError(f"{path.name} に共有ライブラリの名前 {name.decode('ascii')} がありません。")
+    if platform != "linux":
+        return
+    if b"\0" + VARIANT_SYMBOL_VERSION + b"\0" not in data:
+        raise BuildError(
+            f"{path.name} にシンボル バージョン {VARIANT_SYMBOL_VERSION.decode('ascii')} がありません。"
+        )
+    if b"\0" + DEFAULT_SYMBOL_VERSION + b"\0" in data:
+        raise BuildError(
+            f"{path.name} に標準のシンボル バージョン {DEFAULT_SYMBOL_VERSION.decode('ascii')} があります。"
+            " OS の OpenSSL と区別できません。"
+        )
+
+
+def assert_import_lib(path, platform, base):
+    """Windows の import library が、shlib_variant の付いた DLL を参照することを確認する。"""
+    if platform != "windows":
+        return
+    name = runtime_lib_name(platform, base).encode("ascii")
+    if name not in path.read_bytes():
+        raise BuildError(f"{path.name} が {name.decode('ascii')} を参照していません。")
 
 
 def assert_asm(lib_path, target):
-    markers = ASM_MARKERS[target]
+    """静的アーカイブのメンバー名で、アセンブラー実装が有効であることを確認する。
+
+    共有ビルドでも OpenSSL は同じオブジェクトから静的アーカイブを作るため、それを調べる。
+    """
+    markers = ASM_MARKERS[base_target_name(target)]
     if target.startswith("VC-"):
         if shutil.which("lib") is None:
             print(
@@ -888,17 +998,43 @@ def copy_tree_files(src_dir, dest_dir):
         shutil.copy2(path, target)
 
 
-# 静的ライブラリのオブジェクトは /Fdossl_static.pdb でデバッグ情報を書く。
-# 同じ場所の dso.pdb や providers/legacy.pdb は静的ライブラリと関係しないため配置しない。
-# see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/10-main.conf
-STATIC_PDB_NAME = "ossl_static.pdb"
+def copy_pdbs(source, dest_lib, platform):
+    """Windows の DLL と同じ名前の PDB を、DLL と同じ場所へ配置する。
 
-
-def copy_pdbs(source, install_lib, dest_lib):
-    for directory in (source, install_lib):
-        path = directory / STATIC_PDB_NAME
+    静的アーカイブ用の ossl_static.pdb や providers/legacy.pdb は配置しない。
+    see: https://github.com/openssl/openssl/blob/openssl-3.5.9/Configurations/10-main.conf
+    """
+    if platform != "windows":
+        return
+    for base in SHLIB_BASE_NAMES:
+        path = (source / runtime_lib_name(platform, base)).with_suffix(".pdb")
         if path.is_file():
             atomic_copy(path, dest_lib / path.name)
+
+
+def place_link_lib(source, dest_lib, platform, base):
+    """リンク用のファイルを、shlib_variant の付いた名前で配置する。
+
+    OpenSSL のビルドが作るリンク用のファイル名 (libcrypto.so、libcrypto.lib) には
+    shlib_variant が付かない。利用側が LIBS += crypto_app で解決できる名前にする。
+    Linux は実行時用のファイルへの相対シンボリック リンクを作る。
+    Windows は import library をコピーする。import library が参照する DLL 名は、
+    ファイル名を変えても変わらない。
+    """
+    dest = dest_lib / link_lib_name(platform, base)
+    if platform == "linux":
+        temporary = dest.with_name(dest.name + ".tmp")
+        if temporary.is_symlink() or temporary.exists():
+            temporary.unlink()
+        os.symlink(runtime_lib_name(platform, base), temporary)
+        os.replace(temporary, dest)
+        return
+    upstream = find_file(
+        [source / upstream_link_lib_name(platform, base)],
+        upstream_link_lib_name(platform, base),
+    )
+    assert_import_lib(upstream, platform, base)
+    atomic_copy(upstream, dest)
 
 
 def build_and_install(source, platform):
@@ -942,8 +1078,9 @@ def build_app(app, config):
     prefix = (app / "gen" / "install").resolve()
     openssldir = prefix / "ssl"
     linker = find_msvc_linker() if platform == "windows" else None
+    variant_config = (app / "gen" / "shlib-variant.conf").resolve()
     args = configure_args(
-        platform, platform_mod.machine(), config, prefix, openssldir, linker,
+        platform, platform_mod.machine(), config, prefix, openssldir, variant_config, linker,
     )
     identity = build_identity(selected, digest, args)
     stamp_path = app / "gen" / "build.stamp"
@@ -968,6 +1105,10 @@ def build_app(app, config):
                     extract_stamp.unlink()
                 source = ensure_source(app, tar_path, digest)
             print(f"INFO: OpenSSL {OPENSSL_VERSION} を Configure します。", file=sys.stderr)
+            write_text(
+                variant_config,
+                variant_config_text(target_name(platform, platform_mod.machine())),
+            )
             configure_source(source, args, perl)
             write_text(gen_dir / "configure.stamp", "args=" + " ".join(args))
         if platform == "linux":
@@ -979,17 +1120,12 @@ def build_app(app, config):
             stamp_path.unlink()
         print(f"INFO: OpenSSL {OPENSSL_VERSION} をビルドします。", file=sys.stderr)
         build_and_install(source, platform)
-        lib_names = static_lib_names(platform)
-        installed = []
-        for name in lib_names:
-            installed.append(find_file(
-                [
-                    prefix / "lib" / name,
-                    source / name,
-                    source / "lib" / name,
-                ],
-                name,
-            ))
+        runtime_libs = []
+        for base in SHLIB_BASE_NAMES:
+            name = runtime_lib_name(platform, base)
+            path = find_file([source / name], name)
+            assert_shared_variant(path, platform, base)
+            runtime_libs.append((base, path))
         header_dir = find_file(
             [
                 prefix / "include" / "openssl" / "ssl.h",
@@ -997,17 +1133,15 @@ def build_app(app, config):
             ],
             "include/openssl/ssl.h",
         ).parent
-        assert_no_shared([
-            prefix / "lib",
-            prefix / "lib64",
-            source,
-            source / "lib",
-        ])
+        static_archive = static_archive_name(platform, SHLIB_BASE_NAMES[0])
+        assert_asm(find_file([source / static_archive], static_archive), args[0])
         dest_lib = app / "prod" / "lib"
-        for src in installed:
-            atomic_copy(src, dest_lib / src.name)
+        remove_product_libs(app)
+        for base, path in runtime_libs:
+            atomic_copy(path, dest_lib / path.name)
+            place_link_lib(source, dest_lib, platform, base)
         copy_tree_files(header_dir, app / "prod" / "include" / "openssl")
-        copy_pdbs(source, prefix / "lib", dest_lib)
+        copy_pdbs(source, dest_lib, platform)
         atomic_copy(
             find_file([source / LICENSE_NAME], LICENSE_NAME),
             app.joinpath(*LICENSE_RELATIVE),
@@ -1017,18 +1151,17 @@ def build_app(app, config):
             app / "prod" / "include" / "openssl" / "opensslv.h",
             OPENSSL_VERSION,
         )
-        assert_asm(dest_lib / lib_names[0], args[0])
         write_text(stamp_path, identity)
         print(
-            "INFO: 静的ライブラリを配置しました: "
-            + ", ".join(str(dest_lib / name) for name in lib_names),
+            "INFO: 共有ライブラリを配置しました: "
+            + ", ".join(str(dest_lib / name) for name in product_lib_names(platform)),
             file=sys.stderr,
         )
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="OpenSSL の静的ライブラリをビルドして prod へ配置します。",
+        description="OpenSSL の共有ライブラリをビルドして prod へ配置します。",
     )
     parser.add_argument("--app-dir", required=True)
     parser.add_argument("--config", default="RelWithDebInfo")

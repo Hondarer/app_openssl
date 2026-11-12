@@ -1,9 +1,15 @@
 #ifndef _MOCK_OPENSSL_H
 #define _MOCK_OPENSSL_H
 
-/* override 経由の場合、OpenSSL のヘッダーは include_override 側で取り込み済みである。
- * ここで再取り込みすると、もう一方の override ヘッダーが
- * _IN_OVERRIDE_HEADER_OPENSSL_H を #undef して差し替えが無効になる。 */
+/* OpenSSL の関数の mock。
+ *
+ * テスト対象 (TEST_SRCS) は test/include_override/openssl/ の差し替えヘッダーを通してこのヘッダーを取り込み、
+ * OpenSSL の関数の呼び出しが mock_<関数名>(__FILE__, __LINE__, __func__, ...) へ置き換わる。
+ * mock を生成していない場合と、個別の動作を設定していない場合は、kLibCryptoName の共有ライブラリを
+ * 実行時に読み込み、実関数へ委譲する。利用側は mock_openssl だけをリンクし、実ライブラリをリンクしない。
+ * このため、テスト対象が呼ぶ OpenSSL の関数は、失敗を注入しない関数も含めてすべてここへ載せる。
+ *
+ * 差し替えヘッダー経由の場合、OpenSSL の実ヘッダーは差し替えヘッダー側で取り込み済みである。 */
 #ifndef _IN_OVERRIDE_HEADER_OPENSSL_H
     #include <openssl/evp.h>
     #include <openssl/rand.h>
@@ -15,24 +21,28 @@ extern "C"
 #endif
 
     extern EVP_CIPHER_CTX *mock_EVP_CIPHER_CTX_new(const char *, const int, const char *);
+    extern void mock_EVP_CIPHER_CTX_free(const char *, const int, const char *, EVP_CIPHER_CTX *);
+    extern int mock_EVP_CIPHER_CTX_ctrl(const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *);
     extern int mock_EVP_EncryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
-                                       ENGINE *, const unsigned char *, const unsigned char *);
-    extern int mock_EVP_DecryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
                                        ENGINE *, const unsigned char *, const unsigned char *);
     extern int mock_EVP_EncryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *,
                                       const unsigned char *, int);
-    extern int mock_EVP_DecryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *,
-                                      const unsigned char *, int);
     extern int mock_EVP_EncryptFinal_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
                                         int *);
+    extern int mock_EVP_DecryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
+                                       ENGINE *, const unsigned char *, const unsigned char *);
+    extern int mock_EVP_DecryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *,
+                                      const unsigned char *, int);
     extern int mock_EVP_DecryptFinal_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
                                         int *);
-    extern int mock_EVP_CIPHER_CTX_ctrl(const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *);
     extern EVP_MD_CTX *mock_EVP_MD_CTX_new(const char *, const int, const char *);
+    extern void mock_EVP_MD_CTX_free(const char *, const int, const char *, EVP_MD_CTX *);
     extern int mock_EVP_DigestInit_ex(const char *, const int, const char *, EVP_MD_CTX *, const EVP_MD *, ENGINE *);
     extern int mock_EVP_DigestUpdate(const char *, const int, const char *, EVP_MD_CTX *, const void *, size_t);
     extern int mock_EVP_DigestFinal_ex(const char *, const int, const char *, EVP_MD_CTX *, unsigned char *,
                                        unsigned int *);
+    extern const EVP_CIPHER *mock_EVP_aes_256_gcm(const char *, const int, const char *);
+    extern const EVP_MD *mock_EVP_sha256(const char *, const int, const char *);
     extern int mock_RAND_bytes(const char *, const int, const char *, unsigned char *, int);
 
 #ifdef __cplusplus
@@ -41,78 +51,97 @@ extern "C"
 
 #ifdef _IN_OVERRIDE_HEADER_OPENSSL_H
 
-    #define EVP_CIPHER_CTX_new() mock_EVP_CIPHER_CTX_new(__FILE__, __LINE__, __func__)
-    #define EVP_EncryptInit_ex(ctx, type, impl, key, iv) \
-        mock_EVP_EncryptInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl, key, iv)
-    #define EVP_DecryptInit_ex(ctx, type, impl, key, iv) \
-        mock_EVP_DecryptInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl, key, iv)
-    #define EVP_EncryptUpdate(ctx, out, outl, in, inl) \
-        mock_EVP_EncryptUpdate(__FILE__, __LINE__, __func__, ctx, out, outl, in, inl)
-    #define EVP_DecryptUpdate(ctx, out, outl, in, inl) \
-        mock_EVP_DecryptUpdate(__FILE__, __LINE__, __func__, ctx, out, outl, in, inl)
-    #define EVP_EncryptFinal_ex(ctx, out, outl) mock_EVP_EncryptFinal_ex(__FILE__, __LINE__, __func__, ctx, out, outl)
-    #define EVP_DecryptFinal_ex(ctx, out, outl) mock_EVP_DecryptFinal_ex(__FILE__, __LINE__, __func__, ctx, out, outl)
+    #define EVP_CIPHER_CTX_new()     mock_EVP_CIPHER_CTX_new(__FILE__, __LINE__, __func__)
+    #define EVP_CIPHER_CTX_free(ctx) mock_EVP_CIPHER_CTX_free(__FILE__, __LINE__, __func__, ctx)
     #define EVP_CIPHER_CTX_ctrl(ctx, type, arg, ptr) \
         mock_EVP_CIPHER_CTX_ctrl(__FILE__, __LINE__, __func__, ctx, type, arg, ptr)
-    #define EVP_MD_CTX_new()                   mock_EVP_MD_CTX_new(__FILE__, __LINE__, __func__)
-    #define EVP_DigestInit_ex(ctx, type, impl) mock_EVP_DigestInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl)
-    #define EVP_DigestUpdate(ctx, d, cnt)      mock_EVP_DigestUpdate(__FILE__, __LINE__, __func__, ctx, d, cnt)
-    #define EVP_DigestFinal_ex(ctx, md, s)     mock_EVP_DigestFinal_ex(__FILE__, __LINE__, __func__, ctx, md, s)
-    #define RAND_bytes(buf, num)               mock_RAND_bytes(__FILE__, __LINE__, __func__, buf, num)
+    #define EVP_EncryptInit_ex(ctx, type, impl, key, iv) \
+        mock_EVP_EncryptInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl, key, iv)
+    #define EVP_EncryptUpdate(ctx, out, outl, in, inl) \
+        mock_EVP_EncryptUpdate(__FILE__, __LINE__, __func__, ctx, out, outl, in, inl)
+    #define EVP_EncryptFinal_ex(ctx, out, outl) mock_EVP_EncryptFinal_ex(__FILE__, __LINE__, __func__, ctx, out, outl)
+    #define EVP_DecryptInit_ex(ctx, type, impl, key, iv) \
+        mock_EVP_DecryptInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl, key, iv)
+    #define EVP_DecryptUpdate(ctx, out, outl, in, inl) \
+        mock_EVP_DecryptUpdate(__FILE__, __LINE__, __func__, ctx, out, outl, in, inl)
+    #define EVP_DecryptFinal_ex(ctx, out, outl) mock_EVP_DecryptFinal_ex(__FILE__, __LINE__, __func__, ctx, out, outl)
+    #define EVP_MD_CTX_new()                    mock_EVP_MD_CTX_new(__FILE__, __LINE__, __func__)
+    #define EVP_MD_CTX_free(ctx)                mock_EVP_MD_CTX_free(__FILE__, __LINE__, __func__, ctx)
+    #define EVP_DigestInit_ex(ctx, type, impl)  mock_EVP_DigestInit_ex(__FILE__, __LINE__, __func__, ctx, type, impl)
+    #define EVP_DigestUpdate(ctx, d, cnt)       mock_EVP_DigestUpdate(__FILE__, __LINE__, __func__, ctx, d, cnt)
+    #define EVP_DigestFinal_ex(ctx, md, s)      mock_EVP_DigestFinal_ex(__FILE__, __LINE__, __func__, ctx, md, s)
+    #define EVP_aes_256_gcm()                   mock_EVP_aes_256_gcm(__FILE__, __LINE__, __func__)
+    #define EVP_sha256()                        mock_EVP_sha256(__FILE__, __LINE__, __func__)
+    #define RAND_bytes(buf, num)                mock_RAND_bytes(__FILE__, __LINE__, __func__, buf, num)
 
 #else // _IN_OVERRIDE_HEADER_OPENSSL_H
 
     #include <gmock/gmock.h>
 
+    /* 実委譲で読み込む libcrypto の共有ライブラリ名。app/openssl の shlib_variant (_app) と版の番号に対応する。 */
+    #if defined(_WIN32)
+inline constexpr char kLibCryptoName[] = "libcrypto-3-x64_app.dll";
+    #else
+inline constexpr char kLibCryptoName[] = "libcrypto_app.so.3";
+    #endif
+
 extern EVP_CIPHER_CTX *delegate_real_EVP_CIPHER_CTX_new(const char *, const int, const char *);
+extern void delegate_real_EVP_CIPHER_CTX_free(const char *, const int, const char *, EVP_CIPHER_CTX *);
+extern int delegate_real_EVP_CIPHER_CTX_ctrl(const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *);
 extern int delegate_real_EVP_EncryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
-                                            ENGINE *, const unsigned char *, const unsigned char *);
-extern int delegate_real_EVP_DecryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
                                             ENGINE *, const unsigned char *, const unsigned char *);
 extern int delegate_real_EVP_EncryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
                                            int *, const unsigned char *, int);
-extern int delegate_real_EVP_DecryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
-                                           int *, const unsigned char *, int);
 extern int delegate_real_EVP_EncryptFinal_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
                                              int *);
+extern int delegate_real_EVP_DecryptInit_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *,
+                                            ENGINE *, const unsigned char *, const unsigned char *);
+extern int delegate_real_EVP_DecryptUpdate(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
+                                           int *, const unsigned char *, int);
 extern int delegate_real_EVP_DecryptFinal_ex(const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *,
                                              int *);
-extern int delegate_real_EVP_CIPHER_CTX_ctrl(const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *);
 extern EVP_MD_CTX *delegate_real_EVP_MD_CTX_new(const char *, const int, const char *);
+extern void delegate_real_EVP_MD_CTX_free(const char *, const int, const char *, EVP_MD_CTX *);
 extern int delegate_real_EVP_DigestInit_ex(const char *, const int, const char *, EVP_MD_CTX *, const EVP_MD *,
                                            ENGINE *);
 extern int delegate_real_EVP_DigestUpdate(const char *, const int, const char *, EVP_MD_CTX *, const void *, size_t);
 extern int delegate_real_EVP_DigestFinal_ex(const char *, const int, const char *, EVP_MD_CTX *, unsigned char *,
                                             unsigned int *);
+extern const EVP_CIPHER *delegate_real_EVP_aes_256_gcm(const char *, const int, const char *);
+extern const EVP_MD *delegate_real_EVP_sha256(const char *, const int, const char *);
 extern int delegate_real_RAND_bytes(const char *, const int, const char *, unsigned char *, int);
 
 class Mock_openssl
 {
   public:
     MOCK_METHOD(EVP_CIPHER_CTX *, EVP_CIPHER_CTX_new, (const char *, const int, const char *));
+    MOCK_METHOD(void, EVP_CIPHER_CTX_free, (const char *, const int, const char *, EVP_CIPHER_CTX *));
+    MOCK_METHOD(int, EVP_CIPHER_CTX_ctrl, (const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *));
     MOCK_METHOD(int, EVP_EncryptInit_ex,
-                (const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *, ENGINE *,
-                 const unsigned char *, const unsigned char *));
-    MOCK_METHOD(int, EVP_DecryptInit_ex,
                 (const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *, ENGINE *,
                  const unsigned char *, const unsigned char *));
     MOCK_METHOD(int, EVP_EncryptUpdate,
                 (const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *, const unsigned char *,
                  int));
+    MOCK_METHOD(int, EVP_EncryptFinal_ex,
+                (const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *));
+    MOCK_METHOD(int, EVP_DecryptInit_ex,
+                (const char *, const int, const char *, EVP_CIPHER_CTX *, const EVP_CIPHER *, ENGINE *,
+                 const unsigned char *, const unsigned char *));
     MOCK_METHOD(int, EVP_DecryptUpdate,
                 (const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *, const unsigned char *,
                  int));
-    MOCK_METHOD(int, EVP_EncryptFinal_ex,
-                (const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *));
     MOCK_METHOD(int, EVP_DecryptFinal_ex,
                 (const char *, const int, const char *, EVP_CIPHER_CTX *, unsigned char *, int *));
-    MOCK_METHOD(int, EVP_CIPHER_CTX_ctrl, (const char *, const int, const char *, EVP_CIPHER_CTX *, int, int, void *));
     MOCK_METHOD(EVP_MD_CTX *, EVP_MD_CTX_new, (const char *, const int, const char *));
+    MOCK_METHOD(void, EVP_MD_CTX_free, (const char *, const int, const char *, EVP_MD_CTX *));
     MOCK_METHOD(int, EVP_DigestInit_ex,
                 (const char *, const int, const char *, EVP_MD_CTX *, const EVP_MD *, ENGINE *));
     MOCK_METHOD(int, EVP_DigestUpdate, (const char *, const int, const char *, EVP_MD_CTX *, const void *, size_t));
     MOCK_METHOD(int, EVP_DigestFinal_ex,
                 (const char *, const int, const char *, EVP_MD_CTX *, unsigned char *, unsigned int *));
+    MOCK_METHOD(const EVP_CIPHER *, EVP_aes_256_gcm, (const char *, const int, const char *));
+    MOCK_METHOD(const EVP_MD *, EVP_sha256, (const char *, const int, const char *));
     MOCK_METHOD(int, RAND_bytes, (const char *, const int, const char *, unsigned char *, int));
 
     Mock_openssl();
