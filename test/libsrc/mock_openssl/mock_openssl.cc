@@ -25,6 +25,11 @@ Mock_openssl::Mock_openssl()
     ON_CALL(*this, EVP_sha256(_, _, _)).WillByDefault(Invoke(delegate_real_EVP_sha256));
     ON_CALL(*this, RAND_bytes(_, _, _, _, _)).WillByDefault(Invoke(delegate_real_RAND_bytes));
 
+    #define MOCK_OPENSSL_AUTH_API(library, result, name, parameters, arguments, types, matchers, real_parameters, real_arguments, kind) \
+        ON_CALL(*this, name matchers).WillByDefault(Invoke(delegate_real_##name));
+    #include <mock_openssl_auth_api_table.h>
+    #undef MOCK_OPENSSL_AUTH_API
+
     TESTFW_REGISTER_MOCK_INSTANCE(_mock_openssl);
 }
 

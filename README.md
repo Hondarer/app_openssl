@@ -91,19 +91,19 @@ OpenSSL の関数の失敗を単体テストで注入するため、Google Mock 
 | パス | 内容 |
 |---|---|
 | `test/include/mock_openssl.h` | `Mock_openssl` クラスと mock 関数の宣言、置換マクロ、実ライブラリの名前 |
-| `test/include_override/openssl/evp.h`、`rand.h` | 実ヘッダーを取り込んだ後に置換マクロを定義する override ヘッダー |
+| `test/include_override/openssl/` | 実ヘッダーを取り込んだ後に置換マクロを定義する override ヘッダー |
 | `test/libsrc/mock_openssl/` | mock 関数の実装。`test/lib/` に mock ライブラリ `mock_openssl` を作る |
 
 Table: モックの構成
 
 makefw は、テストする app と依存先の app の `test/include_override/` を、テスト対象 (`TEST_SRCS`) のコンパイルだけに追加します。  
-このため、`APP_DEPS` で openssl を取り込んだ app のテスト対象は、`<openssl/evp.h>` と `<openssl/rand.h>` を取り込むと置き換えの対象になります。  
+このため、`APP_DEPS` で openssl を取り込んだ app のテスト対象は、対象の OpenSSL ヘッダーを取り込むと置き換えの対象になります。  
 テスト コードとモック本体は置き換えません。
 
 ### リンクと実委譲
 
 テストの `makepart.mk` には `LIBS += mock_openssl` を指定します。  
-`crypto_app` は同時にリンクしません。
+`ssl_app` と `crypto_app` は同時にリンクしません。
 
 ```cpp
 #include <mock_openssl.h>
@@ -113,7 +113,8 @@ EXPECT_CALL(mock_openssl, RAND_bytes(_, _, _, _, _)).WillOnce(Return(0));
 ```
 
 モックを生成しない場合と、個別の動作を設定していない場合は、OpenSSL の実関数へ委譲します。  
-実関数は、`mock_openssl.h` の `kLibCryptoName` の共有ライブラリ (Linux は `libcrypto_app.so.3`、Windows は `libcrypto-3-x64_app.dll`) を実行時に読み込んで解決します。  
+実関数は、関数の提供元に応じて `mock_openssl.h` の `kLibCryptoName` または `kLibSslName` を実行時に読み込んで解決します。  
+libcrypto は Linux では `libcrypto_app.so.3`、Windows では `libcrypto-3-x64_app.dll`、libssl は Linux では `libssl_app.so.3`、Windows では `libssl-3-x64_app.dll` です。  
 ライブラリまたは関数を解決できない場合は、理由を標準エラーへ出力して終了します。
 
 mock 関数の先頭 3 引数は、呼び出し元のファイル名、行番号、関数名です。  
@@ -131,6 +132,30 @@ mock 関数の先頭 3 引数は、呼び出し元のファイル名、行番号
 - `EVP_DigestInit_ex`、`EVP_DigestUpdate`、`EVP_DigestFinal_ex`
 - `EVP_aes_256_gcm`、`EVP_sha256`
 - `RAND_bytes`
+- `TLS_method`、`DTLS_method`、`SSL_CTX_new`
+- `SSL_CTX_free`、`SSL_CTX_set_options`、`SSL_CTX_ctrl`
+- `SSL_CTX_set_cipher_list`、`SSL_CTX_set_ciphersuites`、`SSL_CTX_set_num_tickets`
+- `SSL_CTX_set_verify`、`SSL_CTX_set_cert_verify_callback`、`SSL_CTX_set_default_passwd_cb`
+- `SSL_CTX_use_certificate_chain_file`、`SSL_CTX_use_PrivateKey_file`、`SSL_CTX_check_private_key`
+- `SSL_CTX_load_verify_locations`、`SSL_CTX_get_cert_store`、`SSL_new`
+- `SSL_free`、`SSL_set_bio`、`SSL_set_ex_data`
+- `SSL_get_ex_data`、`SSL_get_ex_data_X509_STORE_CTX_idx`、`SSL_set_options`
+- `SSL_ctrl`、`SSL_set_connect_state`、`SSL_set_accept_state`
+- `SSL_do_handshake`、`SSL_read_ex`、`SSL_get_error`
+- `SSL_get0_peer_certificate`、`SSL_get_event_timeout`、`SSL_export_keying_material`
+- `BIO_new_file`、`BIO_new`、`BIO_free`
+- `BIO_s_mem`、`BIO_s_dgram_mem`
+- `BIO_ctrl_pending`、`BIO_write`、`BIO_read`
+- `PEM_read_bio_X509`、`PEM_read_bio_X509_CRL`、`X509_free`
+- `X509_CRL_free`、`X509_STORE_add_crl`、`X509_STORE_set_flags`
+- `X509_get_ext_d2i`、`GENERAL_NAMES_free`、`OPENSSL_sk_num`
+- `OPENSSL_sk_value`、`ASN1_STRING_length`、`ASN1_STRING_get0_data`
+- `X509_STORE_CTX_get_ex_data`、`X509_STORE_CTX_get0_cert`、`X509_STORE_CTX_set_error`
+- `X509_STORE_CTX_get_error`、`X509_verify_cert`、`X509_cmp_current_time`
+- `X509_get0_notBefore`、`X509_get0_notAfter`、`X509_cmp`
+- `ERR_clear_error`、`ERR_peek_last_error`
+
+認証で使用する関数の宣言、実委譲、ラッパー、`MOCK_METHOD`、`ON_CALL` は `test/include/mock_openssl_auth_api_table.h` から展開します。
 
 OpenSSL の公開関数は libcrypto と libssl を合わせて約 6,500 個あるため、ワークスペースの app が使う関数だけを対象にします。  
 一覧にない関数をテスト対象が呼ぶと、テストのリンクが未解決シンボルで失敗します。  
@@ -141,7 +166,7 @@ OpenSSL の公開関数は libcrypto と libssl を合わせて約 6,500 個あ�
 - 関数ごとの `mock_<関数名>.cc`
 - この README.md の一覧
 
-対象の関数を宣言するヘッダーが `evp.h` と `rand.h` 以外の場合は、override ヘッダーを追加します。  
+対象の関数を宣言するヘッダーが未登録の場合は、override ヘッダーを追加します。  
 override ヘッダーは、置換マクロを定義する前に、mock が対象とする実ヘッダーをすべて取り込みます。  
 置換マクロの定義後に実ヘッダーが取り込まれると、関数宣言がマクロで書き換えられるためです。  
 実ヘッダーの取り込みには、Linux では `#include_next` を、Windows では include パスからの相対パス (`<../include/openssl/evp.h>`) を使います。  
