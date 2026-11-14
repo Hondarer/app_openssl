@@ -11,6 +11,16 @@
  *
  * 差し替えヘッダー経由の場合、OpenSSL の実ヘッダーは差し替えヘッダー側で取り込み済みである。 */
 #ifndef _IN_OVERRIDE_HEADER_OPENSSL_H
+    #ifdef _WIN32
+        /* OpenSSL のヘッダーは e_ostime.h から winsock2.h を取り込み、winsock2.h は windows.h を取り込む。
+         * WIN32_LEAN_AND_MEAN がないと windows.h が rpcndr.h まで取り込み、その byte 型が、
+         * test_com.h の using namespace std; で見える C++17 の std::byte と衝突する。
+         * see: https://learn.microsoft.com/en-us/windows/win32/winprog/using-the-windows-headers */
+        #ifndef WIN32_LEAN_AND_MEAN
+            #define WIN32_LEAN_AND_MEAN
+        #endif /* WIN32_LEAN_AND_MEAN */
+        #include <winsock2.h>
+    #endif /* _WIN32 */
     #include <openssl/evp.h>
     #include <openssl/rand.h>
     #include <openssl/ssl.h>
