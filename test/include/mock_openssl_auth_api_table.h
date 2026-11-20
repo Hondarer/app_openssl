@@ -258,3 +258,7 @@ MOCK_OPENSSL_AUTH_API(Crypto, void, ERR_clear_error, (const char *file, const in
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_ERR_peek_last_error)
 MOCK_OPENSSL_AUTH_API(Crypto, unsigned long, ERR_peek_last_error, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VALUE)
 #endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_ERR_reason_error_string)
+MOCK_OPENSSL_AUTH_API(Crypto, const char *, ERR_reason_error_string, (const char *file, const int line, const char *func, unsigned long error), (file, line, func, error), (const char *, const int, const char *, unsigned long), (_, _, _, _), (unsigned long error), (error), VALUE)
+#endif

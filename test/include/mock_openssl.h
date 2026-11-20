@@ -140,6 +140,7 @@ extern "C"
     #define X509_cmp(left, right) mock_X509_cmp(__FILE__, __LINE__, __func__, left, right)
     #define ERR_clear_error() mock_ERR_clear_error(__FILE__, __LINE__, __func__)
     #define ERR_peek_last_error() mock_ERR_peek_last_error(__FILE__, __LINE__, __func__)
+    #define ERR_reason_error_string(error) mock_ERR_reason_error_string(__FILE__, __LINE__, __func__, error)
 
     #define EVP_CIPHER_CTX_new()     mock_EVP_CIPHER_CTX_new(__FILE__, __LINE__, __func__)
     #define EVP_CIPHER_CTX_free(ctx) mock_EVP_CIPHER_CTX_free(__FILE__, __LINE__, __func__, ctx)

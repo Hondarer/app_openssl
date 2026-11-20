@@ -153,7 +153,7 @@ mock 関数の先頭 3 引数は、呼び出し元のファイル名、行番号
 - `X509_STORE_CTX_get_ex_data`、`X509_STORE_CTX_get0_cert`、`X509_STORE_CTX_set_error`
 - `X509_STORE_CTX_get_error`、`X509_verify_cert`、`X509_cmp_current_time`
 - `X509_get0_notBefore`、`X509_get0_notAfter`、`X509_cmp`
-- `ERR_clear_error`、`ERR_peek_last_error`
+- `ERR_clear_error`、`ERR_peek_last_error`、`ERR_reason_error_string`
 
 認証で使用する関数の宣言、実委譲、ラッパー、`MOCK_METHOD`、`ON_CALL` は `test/include/mock_openssl_auth_api_table.h` から展開します。
 
