@@ -5,6 +5,7 @@
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include "openssl_calls.h"
 
 const char *mock_openssl_test_caller_file(void)
 {
