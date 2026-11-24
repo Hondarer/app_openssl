@@ -51,8 +51,16 @@ MOCK_OPENSSL_AUTH_API(Ssl, void, SSL_CTX_set_cert_verify_callback, (const char *
 MOCK_OPENSSL_AUTH_API(Ssl, void, SSL_CTX_set_default_passwd_cb, (const char *file, const int line, const char *func, SSL_CTX * context, pem_password_cb * callback), (file, line, func, context, callback), (const char *, const int, const char *, SSL_CTX *, pem_password_cb *), (_, _, _, _, _), (SSL_CTX * context, pem_password_cb * callback), (context, callback), VOID)
 #endif
 
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_SSL_CTX_use_certificate)
+MOCK_OPENSSL_AUTH_API(Ssl, int, SSL_CTX_use_certificate, (const char *file, const int line, const char *func, SSL_CTX * context, X509 * certificate), (file, line, func, context, certificate), (const char *, const int, const char *, SSL_CTX *, X509 *), (_, _, _, _, _), (SSL_CTX * context, X509 * certificate), (context, certificate), VALUE)
+#endif
+
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_SSL_CTX_use_certificate_chain_file)
 MOCK_OPENSSL_AUTH_API(Ssl, int, SSL_CTX_use_certificate_chain_file, (const char *file, const int line, const char *func, SSL_CTX * context, const char * path), (file, line, func, context, path), (const char *, const int, const char *, SSL_CTX *, const char *), (_, _, _, _, _), (SSL_CTX * context, const char * path), (context, path), VALUE)
+#endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_SSL_CTX_use_PrivateKey)
+MOCK_OPENSSL_AUTH_API(Ssl, int, SSL_CTX_use_PrivateKey, (const char *file, const int line, const char *func, SSL_CTX * context, EVP_PKEY * key), (file, line, func, context, key), (const char *, const int, const char *, SSL_CTX *, EVP_PKEY *), (_, _, _, _, _), (SSL_CTX * context, EVP_PKEY * key), (context, key), VALUE)
 #endif
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_SSL_CTX_use_PrivateKey_file)
@@ -151,8 +159,16 @@ MOCK_OPENSSL_AUTH_API(Crypto, int, BIO_free, (const char *file, const int line, 
 MOCK_OPENSSL_AUTH_API(Crypto, const BIO_METHOD *, BIO_s_mem, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VALUE)
 #endif
 
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_BIO_s_secmem)
+MOCK_OPENSSL_AUTH_API(Crypto, const BIO_METHOD *, BIO_s_secmem, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VALUE)
+#endif
+
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_BIO_s_dgram_mem)
 MOCK_OPENSSL_AUTH_API(Crypto, const BIO_METHOD *, BIO_s_dgram_mem, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VALUE)
+#endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_BIO_ctrl)
+MOCK_OPENSSL_AUTH_API(Crypto, long, BIO_ctrl, (const char *file, const int line, const char *func, BIO * bio, int command, long number, void * pointer), (file, line, func, bio, command, number, pointer), (const char *, const int, const char *, BIO *, int, long, void *), (_, _, _, _, _, _, _), (BIO * bio, int command, long number, void * pointer), (bio, command, number, pointer), VALUE)
 #endif
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_BIO_ctrl_pending)
@@ -175,12 +191,24 @@ MOCK_OPENSSL_AUTH_API(Crypto, X509 *, PEM_read_bio_X509, (const char *file, cons
 MOCK_OPENSSL_AUTH_API(Crypto, X509_CRL *, PEM_read_bio_X509_CRL, (const char *file, const int line, const char *func, BIO * bio, X509_CRL ** revocations, pem_password_cb * callback, void * userdata), (file, line, func, bio, revocations, callback, userdata), (const char *, const int, const char *, BIO *, X509_CRL **, pem_password_cb *, void *), (_, _, _, _, _, _, _), (BIO * bio, X509_CRL ** revocations, pem_password_cb * callback, void * userdata), (bio, revocations, callback, userdata), VALUE)
 #endif
 
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_PEM_read_bio_PrivateKey)
+MOCK_OPENSSL_AUTH_API(Crypto, EVP_PKEY *, PEM_read_bio_PrivateKey, (const char *file, const int line, const char *func, BIO * bio, EVP_PKEY ** key, pem_password_cb * callback, void * userdata), (file, line, func, bio, key, callback, userdata), (const char *, const int, const char *, BIO *, EVP_PKEY **, pem_password_cb *, void *), (_, _, _, _, _, _, _), (BIO * bio, EVP_PKEY ** key, pem_password_cb * callback, void * userdata), (bio, key, callback, userdata), VALUE)
+#endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_EVP_PKEY_free)
+MOCK_OPENSSL_AUTH_API(Crypto, void, EVP_PKEY_free, (const char *file, const int line, const char *func, EVP_PKEY * key), (file, line, func, key), (const char *, const int, const char *, EVP_PKEY *), (_, _, _, _), (EVP_PKEY * key), (key), VOID)
+#endif
+
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_X509_free)
 MOCK_OPENSSL_AUTH_API(Crypto, void, X509_free, (const char *file, const int line, const char *func, X509 * certificate), (file, line, func, certificate), (const char *, const int, const char *, X509 *), (_, _, _, _), (X509 * certificate), (certificate), VOID)
 #endif
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_X509_CRL_free)
 MOCK_OPENSSL_AUTH_API(Crypto, void, X509_CRL_free, (const char *file, const int line, const char *func, X509_CRL * revocations), (file, line, func, revocations), (const char *, const int, const char *, X509_CRL *), (_, _, _, _), (X509_CRL * revocations), (revocations), VOID)
+#endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_X509_STORE_add_cert)
+MOCK_OPENSSL_AUTH_API(Crypto, int, X509_STORE_add_cert, (const char *file, const int line, const char *func, X509_STORE * store, X509 * certificate), (file, line, func, store, certificate), (const char *, const int, const char *, X509_STORE *, X509 *), (_, _, _, _, _), (X509_STORE * store, X509 * certificate), (store, certificate), VALUE)
 #endif
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_X509_STORE_add_crl)
@@ -253,6 +281,10 @@ MOCK_OPENSSL_AUTH_API(Crypto, int, X509_cmp, (const char *file, const int line, 
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_ERR_clear_error)
 MOCK_OPENSSL_AUTH_API(Crypto, void, ERR_clear_error, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VOID)
+#endif
+
+#if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_ERR_get_error)
+MOCK_OPENSSL_AUTH_API(Crypto, unsigned long, ERR_get_error, (const char *file, const int line, const char *func), (file, line, func), (const char *, const int, const char *), (_, _, _), (void), (), VALUE)
 #endif
 
 #if !defined(MOCK_OPENSSL_AUTH_ONE_FUNCTION) || defined(MOCK_OPENSSL_AUTH_FUNCTION_ERR_peek_last_error)

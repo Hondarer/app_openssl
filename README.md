@@ -136,24 +136,26 @@ mock 関数の先頭 3 引数は、呼び出し元のファイル名、行番号
 - `SSL_CTX_free`、`SSL_CTX_set_options`、`SSL_CTX_ctrl`
 - `SSL_CTX_set_cipher_list`、`SSL_CTX_set_ciphersuites`、`SSL_CTX_set_num_tickets`
 - `SSL_CTX_set_verify`、`SSL_CTX_set_cert_verify_callback`、`SSL_CTX_set_default_passwd_cb`
-- `SSL_CTX_use_certificate_chain_file`、`SSL_CTX_use_PrivateKey_file`、`SSL_CTX_check_private_key`
+- `SSL_CTX_use_certificate`、`SSL_CTX_use_certificate_chain_file`、`SSL_CTX_use_PrivateKey`
+- `SSL_CTX_use_PrivateKey_file`、`SSL_CTX_check_private_key`
 - `SSL_CTX_load_verify_locations`、`SSL_CTX_get_cert_store`、`SSL_new`
 - `SSL_free`、`SSL_set_bio`、`SSL_set_ex_data`
 - `SSL_get_ex_data`、`SSL_get_ex_data_X509_STORE_CTX_idx`、`SSL_set_options`
-- `SSL_ctrl`、`SSL_set_connect_state`、`SSL_set_accept_state`
+- `SSL_ctrl` (`SSL_CTX_add_extra_chain_cert` の実体を含む)、`SSL_set_connect_state`、`SSL_set_accept_state`
 - `SSL_do_handshake`、`SSL_read_ex`、`SSL_get_error`
 - `SSL_get0_peer_certificate`、`SSL_get_event_timeout`、`SSL_export_keying_material`
 - `BIO_new_file`、`BIO_new`、`BIO_free`
-- `BIO_s_mem`、`BIO_s_dgram_mem`
-- `BIO_ctrl_pending`、`BIO_write`、`BIO_read`
-- `PEM_read_bio_X509`、`PEM_read_bio_X509_CRL`、`X509_free`
-- `X509_CRL_free`、`X509_STORE_add_crl`、`X509_STORE_set_flags`
+- `BIO_s_mem`、`BIO_s_secmem`、`BIO_s_dgram_mem`
+- `BIO_ctrl` (`BIO_set_mem_eof_return` の実体を含む)、`BIO_ctrl_pending`、`BIO_write`、`BIO_read`
+- `PEM_read_bio_X509`、`PEM_read_bio_X509_CRL`、`PEM_read_bio_PrivateKey`
+- `EVP_PKEY_free`、`X509_free`、`X509_CRL_free`
+- `X509_STORE_add_cert`、`X509_STORE_add_crl`、`X509_STORE_set_flags`
 - `X509_get_ext_d2i`、`GENERAL_NAMES_free`、`OPENSSL_sk_num`
 - `OPENSSL_sk_value`、`ASN1_STRING_length`、`ASN1_STRING_get0_data`
 - `X509_STORE_CTX_get_ex_data`、`X509_STORE_CTX_get0_cert`、`X509_STORE_CTX_set_error`
 - `X509_STORE_CTX_get_error`、`X509_verify_cert`、`X509_cmp_current_time`
 - `X509_get0_notBefore`、`X509_get0_notAfter`、`X509_cmp`
-- `ERR_clear_error`、`ERR_peek_last_error`、`ERR_reason_error_string`
+- `ERR_clear_error`、`ERR_get_error`、`ERR_peek_last_error`、`ERR_reason_error_string`
 
 認証で使用する関数の宣言、実委譲、ラッパー、`MOCK_METHOD`、`ON_CALL` は `test/include/mock_openssl_auth_api_table.h` から展開します。
 
