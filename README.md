@@ -11,12 +11,12 @@ c-modernization-kit のワークスペース内 (`framework/makefw` 等と組み
 OpenSSL 3.5.9 の libcrypto と libssl を、共有ライブラリとして取り込みます。  
 openssl コマンドとマニュアルは作りません。
 
+Table: 環境別の OpenSSL 共有ライブラリとリンク指定
+
 | 環境 | 実行時に使うファイル | リンク時に使うファイル | リンク指定 |
 |---|---|---|---|
 | Linux/GCC | `prod/lib/libssl_app.so.3`、`prod/lib/libcrypto_app.so.3` | `libssl_app.so`、`libcrypto_app.so` (シンボリック リンク) | `LIBS += ssl_app crypto_app` |
 | Windows/MSVC | `prod/lib/libssl-3-x64_app.dll`、`prod/lib/libcrypto-3-x64_app.dll` | `libssl_app.lib`、`libcrypto_app.lib` (import library) | `LIBS += ssl_app crypto_app` |
-
-Table: 環境別の OpenSSL 共有ライブラリとリンク指定
 
 静的ライブラリは配置しません。  
 OS にインストールされた OpenSSL の置き換えは行いません。  
@@ -43,13 +43,13 @@ Windows の import library は、名前を変えても参照する DLL 名は変
 
 Configure には、[INSTALL.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/INSTALL.md) に記載の次のオプションを渡します。
 
+Table: Configure に渡す主なオプションと理由
+
 | オプション | 理由 |
 |---|---|
 | `shared` | 共有ライブラリを作る |
 | `no-autoload-config` | 初期化時に `openssl.cnf` を自動で読まない |
 | `no-padlockeng` | VIA の CPU 専用の PadLock エンジンを作らない |
-
-Table: Configure に渡す主なオプションと理由
 
 ターゲットは、OpenSSL のターゲット (`linux-x86_64` など) を継承して `shlib_variant` だけを追加した定義です。  
 ビルド スクリプトが定義ファイルを `gen/shlib-variant.conf` に生成し、Configure の `--config` で渡します。
@@ -88,13 +88,13 @@ OpenSSL の関数の失敗を単体テストで注入するため、Google Mock 
 テスト対象のソースが取り込む OpenSSL のヘッダーを差し替え、呼び出しをマクロで mock 関数へ置き換えます。  
 この方式により、mock 関数は呼び出し元のファイル名、行番号、関数名を受け取ります。
 
+Table: モックの構成
+
 | パス | 内容 |
 |---|---|
 | `test/include/mock_openssl.h` | `Mock_openssl` クラスと mock 関数の宣言、置換マクロ、実ライブラリの名前 |
 | `test/include_override/openssl/` | 実ヘッダーを取り込んだ後に置換マクロを定義する override ヘッダー |
 | `test/libsrc/mock_openssl/` | mock 関数の実装。`test/lib/` に mock ライブラリ `mock_openssl` を作る |
-
-Table: モックの構成
 
 makefw は、テストする app と依存先の app の `test/include_override/` を、テスト対象 (`TEST_SRCS`) のコンパイルだけに追加します。  
 このため、`APP_DEPS` で openssl を取り込んだ app のテスト対象は、対象の OpenSSL ヘッダーを取り込むと置き換えの対象になります。  
@@ -205,12 +205,12 @@ Linux のビルドでは警告は出ません。
 
 Configure と、アセンブラー ソースの生成には Perl が必要です。
 
+Table: 環境別の OpenSSL のビルドに必要なツール
+
 | 環境 | ツール |
 |---|---|
 | Linux | GCC、GNU アセンブラー、make、Perl 5.10 以上 (`FindBin`、`IPC::Cmd`、`Time::Piece` を含む) |
 | Windows | Visual Studio の C/C++ ビルド ツール (`cl`、`nmake`、`lib`)、NASM 2.13.3 以上、`strawberry-perl` |
-
-Table: 環境別の OpenSSL のビルドに必要なツール
 
 RPM 系の Linux では、`perl` パッケージだけでは Perl のモジュールが足りないため、`perl-core` を導入します ([NOTES-PERL.md](https://github.com/openssl/openssl/blob/openssl-3.5.9/NOTES-PERL.md))。  
 個別に導入する場合は `perl-IPC-Cmd` と `perl-Time-Piece` を入れ、EL9 以降は `perl-FindBin` も入れます。
